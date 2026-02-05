@@ -11,14 +11,19 @@ import string
 from flask import Flask, render_template, request, jsonify, Response
 from flask import send_from_directory
 import qrcode
+from flask_cors import CORS
 from io import BytesIO
 from PIL import Image
+from flask import Flask, render_template, request, jsonify, Response, redirect
+from flask import send_from_directory
 
 app = Flask(__name__)
+CORS(app)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
 
 # In-memory storage (use database in production)
 shared_items = {}
+shortened_urls = {}
 MAX_STORAGE_DURATION = 24 * 3600  # 24 hours in seconds
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
@@ -27,6 +32,11 @@ def generate_secret_code(length=12):
     chars = string.ascii_uppercase + string.digits
     # Remove ambiguous characters
     chars = chars.replace('I', '').replace('1', '').replace('0', '').replace('O', '')
+    return ''.join(secrets.choice(chars) for _ in range(length))
+
+def generate_short_code(length=6):
+    """Generate a short URL code"""
+    chars = string.ascii_lowercase + string.digits
     return ''.join(secrets.choice(chars) for _ in range(length))
 
 def cleanup_expired():
@@ -326,6 +336,146 @@ def retrieve_page(code):
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     return send_from_directory('static', filename)
+
+@app.route("/shorten", methods=["POST", "OPTIONS"])
+def shorten_url():
+    """Shorten a URL"""
+    # Handle preflight CORS requests
+    if request.method == "OPTIONS":
+        response = jsonify({"status": "ok"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "*")
+        response.headers.add("Access-Control-Allow-Methods", "*")
+        return response
+    
+    try:
+        cleanup_expired()
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+            
+        original_url = data.get("url", "").strip()
+        custom_code = data.get("custom_code", "").strip().lower()
+        
+        if not original_url:
+            return jsonify({"success": False, "error": "No URL provided"}), 400
+        
+        if not original_url.startswith(('http://', 'https://')):
+            original_url = 'https://' + original_url
+        
+        # Generate or use custom code
+        if custom_code:
+            if len(custom_code) < 4 or len(custom_code) > 12:
+                return jsonify({"success": False, "error": "Custom code must be 4-12 characters"}), 400
+            if not all(c.isalnum() for c in custom_code):
+                return jsonify({"success": False, "error": "Custom code can only contain letters and numbers"}), 400
+            if custom_code in shortened_urls:
+                return jsonify({"success": False, "error": "Custom code already in use"}), 400
+            short_code = custom_code
+        else:
+            short_code = generate_short_code()
+            while short_code in shortened_urls:
+                short_code = generate_short_code()
+        
+        # Store the shortened URL
+        shortened_urls[short_code] = {
+            'original_url': original_url,
+            'timestamp': time.time(),
+            'visits': 0
+        }
+        
+        # Use request.host_url which should work on Render
+        short_url = f"{request.host_url}{short_code}"
+        
+        response = jsonify({
+            "success": True, 
+            "short_code": short_code,
+            "short_url": short_url,
+            "original_url": original_url
+        })
+        
+        # Add CORS headers
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+        
+    except Exception as e:
+        print(f"Error shortening URL: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/<short_code>")
+def redirect_short_url(short_code):
+    """Redirect to original URL"""
+    cleanup_expired()
+    
+    short_code = short_code.lower()
+    
+    if short_code in shortened_urls:
+        shortened_urls[short_code]['visits'] += 1
+        return redirect(shortened_urls[short_code]['original_url'])
+    else:
+        return redirect("/")
+
+@app.route("/shorten/stats", methods=["POST", "OPTIONS"])
+def get_short_url_stats():
+    """Get statistics for a short URL"""
+    # Handle preflight CORS
+    if request.method == "OPTIONS":
+        response = jsonify({"status": "ok"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        response.headers.add("Access-Control-Allow-Headers", "*")
+        response.headers.add("Access-Control-Allow-Methods", "*")
+        return response
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+            
+        short_code = data.get("code", "").strip().lower()
+        
+        if not short_code:
+            return jsonify({"success": False, "error": "No code provided"}), 400
+        
+        if short_code not in shortened_urls:
+            return jsonify({"success": False, "error": "Invalid or expired short URL"}), 404
+        
+        item = shortened_urls[short_code]
+        expires_at = int(item['timestamp'] + MAX_STORAGE_DURATION)
+        
+        response = jsonify({
+            "success": True,
+            "short_code": short_code,
+            "original_url": item['original_url'],
+            "visits": item['visits'],
+            "created_at": int(item['timestamp']),
+            "expires_at": expires_at,
+            "short_url": f"{request.host_url}{short_code}"
+        })
+        
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# Also update the cleanup_expired function to clean shortened URLs
+def cleanup_expired():
+    """Remove expired shared items and shortened URLs"""
+    current_time = time.time()
+    
+    # Clean shared items
+    expired_items = [code for code, item in shared_items.items() 
+                     if current_time - item['timestamp'] > MAX_STORAGE_DURATION]
+    for code in expired_items:
+        del shared_items[code]
+    
+    # Clean shortened URLs (if the dictionary exists)
+    if 'shortened_urls' in globals():
+        expired_urls = [code for code, item in shortened_urls.items()
+                        if current_time - item['timestamp'] > MAX_STORAGE_DURATION]
+        for code in expired_urls:
+            del shortened_urls[code]
 
 # Change the run section to:
 if __name__ == "__main__":
