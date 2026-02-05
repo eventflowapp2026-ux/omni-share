@@ -1,0 +1,1377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Secure Share Portal v3.0</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Favicon -->
+  <link rel="icon" type="image/png" href="/static/icon.png">
+  <style>
+    #qr-result, #share-result, #shorten-result { max-width: 300px; margin: 1rem auto; }
+    .dropzone { border: 2px dashed #cbd5e0; border-radius: 8px; padding: 2rem; text-align: center; cursor: pointer; transition: all 0.3s; }
+    .dropzone:hover, .dropzone.dragover { border-color: #3b82f6; background: #eff6ff; }
+    .qr-img { max-width: 100%; height: auto; }
+    .loading { opacity: 0.6; }
+    .btn-primary { background: #3b82f6; color: white; padding: 0.5rem 1rem; border-radius: 6px; transition: background 0.3s; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
+    .btn-secondary { background: #10b981; color: white; padding: 0.5rem 1rem; border-radius: 6px; transition: background 0.3s; }
+    .btn-secondary:hover { background: #059669; }
+    .btn-warning { background: #f59e0b; color: white; padding: 0.5rem 1rem; border-radius: 6px; transition: background 0.3s; }
+    .btn-warning:hover { background: #d97706; }
+    .logo-preview { max-width: 100px; max-height: 100px; margin: 0.5rem auto; border-radius: 4px; }
+    .options-panel { background: #f8fafc; border-radius: 8px; padding: 1rem; margin: 1rem 0; }
+    .slider-container { margin: 1rem 0; }
+    .slider-label { display: flex; justify-content: space-between; margin-bottom: 0.5rem; }
+    .slider { width: 100%; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .tab-btn { padding: 0.75rem 1.5rem; border-radius: 8px 8px 0 0; transition: all 0.3s; }
+    .tab-btn.active { background: white; border-bottom: 3px solid #3b82f6; }
+    .secret-code, .short-url-code { font-family: monospace; font-size: 1.5rem; letter-spacing: 2px; background: #f3f4f6; padding: 1rem; border-radius: 8px; margin: 1rem 0; }
+    .copy-btn { background: #6b7280; color: white; padding: 0.25rem 0.75rem; border-radius: 4px; font-size: 0.875rem; }
+    .copy-btn:hover { background: #4b5563; }
+    .share-link, .shortened-url { word-break: break-all; background: #f0f9ff; padding: 0.75rem; border-radius: 6px; margin: 0.5rem 0; }
+    .feature-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 1.5rem; margin: 1rem 0; transition: transform 0.3s; }
+    .feature-card:hover { transform: translateY(-2px); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+    .info-box { background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 1rem; margin: 1rem 0; }
+    .stats-box { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 1rem; margin: 1rem 0; }
+    .url-input-group { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .url-input { flex: 1; }
+    .custom-code-input { width: 150px; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div class="container mx-auto px-4 py-8 max-w-6xl">
+    <!-- Header -->
+    <!-- Header with Logo -->
+    <header class="text-center mb-12">
+      <div class="flex flex-col items-center mb-4">
+        <!-- Logo Image -->
+        <div class="flex items-center justify-center mb-4">
+          <img src="/static/icon.png" alt="OmniShare Logo" class="h-16 w-16 mr-3">
+          <div class="text-left">
+            <h1 class="text-4xl font-bold text-gray-800">OmniShare</h1>
+            <p class="text-gray-600 text-lg">QR • Links • Files • All in One</p>
+          </div>
+        </div>
+        
+        <!-- Feature Tags -->
+        <div class="flex flex-wrap justify-center gap-2 mt-2">
+          <span class="bg-blue-100 text-blue-800 text-xs font-medium px-3 py-1 rounded-full">
+            <i class="fas fa-qrcode mr-1"></i>QR Generator
+          </span>
+          <span class="bg-yellow-100 text-yellow-800 text-xs font-medium px-3 py-1 rounded-full">
+            <i class="fas fa-link mr-1"></i>URL Shortener
+          </span>
+          <span class="bg-green-100 text-green-800 text-xs font-medium px-3 py-1 rounded-full">
+            <i class="fas fa-shield-alt mr-1"></i>Secure Share
+          </span>
+          <span class="bg-purple-100 text-purple-800 text-xs font-medium px-3 py-1 rounded-full">
+            <i class="fas fa-unlock-alt mr-1"></i>Retrieve
+          </span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Tabs Navigation -->
+    <div class="flex flex-wrap justify-center gap-2 mb-8 bg-white rounded-lg p-2 shadow">
+      <button class="tab-btn active" onclick="switchTab('qr-tab')">
+        <i class="fas fa-qrcode mr-2"></i>QR Generator
+      </button>
+      <button class="tab-btn" onclick="switchTab('shorten-tab')">
+        <i class="fas fa-link mr-2"></i>URL Shortener
+      </button>
+      <button class="tab-btn" onclick="switchTab('share-tab')">
+        <i class="fas fa-share-alt mr-2"></i>Secure Share
+      </button>
+      <button class="tab-btn" onclick="switchTab('retrieve-tab')">
+        <i class="fas fa-key mr-2"></i>Retrieve
+      </button>
+      <button class="tab-btn" onclick="switchTab('about-tab')">
+        <i class="fas fa-info-circle mr-2"></i>About
+      </button>
+    </div>
+
+    <!-- QR Generator Tab -->
+    <div id="qr-tab" class="tab-content active">
+      <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+        <h2 class="text-2xl font-bold text-center mb-6">
+          <i class="fas fa-qrcode text-blue-600 mr-2"></i>QR Code Generator
+        </h2>
+
+        <!-- URL input form -->
+        <div class="mb-6">
+          <form id="url-form">
+            <label class="block text-sm font-medium mb-2">Paste a link</label>
+            <div class="flex gap-2">
+              <input type="text" 
+                     name="url" 
+                     placeholder="https://example.com"
+                     value="https://overpotent-bianca-foamy.ngrok-free.dev"
+                     class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                     hx-post="/qr/url"
+                     hx-trigger="keyup changed delay:800ms"
+                     hx-target="#qr-result"
+                     hx-include="#logo-options"
+                     hx-swap="innerHTML">
+              <button type="button"
+                      id="convert-btn"
+                      class="btn-primary whitespace-nowrap"
+                      onclick="convertUrlToQR()">
+                Convert to QR
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div class="text-center text-gray-500 mb-4">OR</div>
+
+        <!-- File drop zone -->
+        <div class="mb-6">
+          <label class="block text-sm font-medium mb-2">Drop a file to create QR code</label>
+          <div id="dropzone" class="dropzone">
+            <p class="text-gray-600">Drag & drop a file here</p>
+            <p class="text-sm text-gray-500 mt-1">(or click to select)</p>
+            <input type="file" id="file-input" name="file" class="hidden">
+          </div>
+        </div>
+
+        <!-- Logo Options Panel -->
+        <div id="logo-options" class="options-panel">
+          <h3 class="font-medium mb-3">Logo Options (Optional)</h3>
+          
+          <!-- Logo Upload -->
+          <div class="mb-4">
+            <label class="block text-sm font-medium mb-2">Upload Logo</label>
+            <div id="logo-dropzone" class="dropzone" style="padding: 1rem;">
+              <p class="text-gray-600 text-sm">Drag & drop logo image</p>
+              <p class="text-xs text-gray-500 mt-1">PNG, JPG, SVG (transparent background recommended)</p>
+              <input type="file" id="logo-input" accept="image/*" class="hidden">
+            </div>
+            <div id="logo-preview-container" class="text-center hidden">
+              <img id="logo-preview" class="logo-preview">
+              <button type="button" onclick="removeLogo()" class="text-sm text-red-600 hover:text-red-800 mt-2">
+                Remove Logo
+              </button>
+            </div>
+          </div>
+
+          <!-- Logo Size Slider -->
+          <div class="slider-container">
+            <div class="slider-label">
+              <span class="text-sm font-medium">Logo Size</span>
+              <span id="logo-size-value" class="text-sm text-gray-600">25%</span>
+            </div>
+            <input type="range" 
+                   id="logo-size" 
+                   name="logo_size" 
+                   min="10" 
+                   max="40" 
+                   value="25" 
+                   class="slider"
+                   hx-post="/qr/url"
+                   hx-trigger="change delay:500ms"
+                   hx-target="#qr-result"
+                   hx-include="input[name='url'], #logo-options">
+          </div>
+
+          <!-- Logo Background -->
+          <div class="mb-3">
+            <label class="flex items-center">
+              <input type="checkbox" 
+                     id="logo-bg" 
+                     name="logo_bg" 
+                     value="1"
+                     class="mr-2"
+                     hx-post="/qr/url"
+                     hx-trigger="change"
+                     hx-target="#qr-result"
+                     hx-include="input[name='url'], #logo-options">
+              <span class="text-sm">Add white background behind logo</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- QR result -->
+        <div id="qr-result" class="text-center min-h-20">
+          <p class="text-gray-500">QR code will appear here...</p>
+        </div>
+
+        <!-- Download button -->
+        <div id="download-section" class="text-center mt-4 hidden">
+          <button id="download-btn" class="btn-primary mr-2">
+            <i class="fas fa-download mr-2"></i>Download QR Code
+          </button>
+          <button onclick="switchTab('shorten-tab')" class="btn-warning mr-2">
+            <i class="fas fa-link mr-2"></i>Shorten This URL
+          </button>
+          <button onclick="switchTab('share-tab')" class="btn-secondary">
+            <i class="fas fa-share-alt mr-2"></i>Share Securely
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- URL Shortener Tab -->
+    <div id="shorten-tab" class="tab-content">
+      <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+        <h2 class="text-2xl font-bold text-center mb-6">
+          <i class="fas fa-link text-yellow-600 mr-2"></i>URL Shortener
+        </h2>
+        
+        <div class="info-box">
+          <p class="font-medium">Shorten long URLs into easy-to-share links</p>
+          <p class="text-sm text-gray-600 mt-1">Short URLs expire after 24 hours. Track clicks and generate QR codes.</p>
+        </div>
+
+        <!-- URL Shortener Form -->
+        <div class="mb-6">
+          <form id="shorten-form" onsubmit="shortenUrl(event)">
+            <div class="mb-4">
+              <label class="block text-sm font-medium mb-2">Enter URL to shorten</label>
+              <input type="url" 
+                     id="url-to-shorten" 
+                     placeholder="https://example.com/very-long-url"
+                     class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                     required>
+            </div>
+            
+            <div class="mb-4">
+              <label class="block text-sm font-medium mb-2">Custom Code (Optional)</label>
+              <div class="flex gap-2">
+                <input type="text" 
+                       id="custom-code"
+                       placeholder="mycode"
+                       pattern="[a-z0-9]{4,12}"
+                       title="4-12 lowercase letters or numbers"
+                       class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent">
+                <div class="text-sm text-gray-500 flex items-center">
+                  <i class="fas fa-info-circle mr-1"></i>4-12 chars
+                </div>
+              </div>
+              <p class="text-xs text-gray-500 mt-1">Leave empty for auto-generated code</p>
+            </div>
+            
+            <button type="submit" class="btn-warning w-full">
+              <i class="fas fa-scissors mr-2"></i>Shorten URL
+            </button>
+          </form>
+        </div>
+
+        <!-- Shorten Result -->
+        <div id="shorten-result" class="mt-8 text-center min-h-20">
+          <p class="text-gray-500">Your shortened URL will appear here...</p>
+        </div>
+
+        <!-- Stats Lookup -->
+        <div class="mt-8 pt-6 border-t border-gray-300">
+          <h3 class="text-lg font-medium mb-4">Check URL Stats</h3>
+          <form id="stats-form" onsubmit="checkStats(event)">
+            <div class="flex gap-2">
+              <input type="text" 
+                     id="stats-code"
+                     placeholder="Enter short code (e.g., abc123)"
+                     class="flex-1 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-yellow-500 focus:border-transparent">
+              <button type="submit" class="btn-primary whitespace-nowrap">
+                <i class="fas fa-chart-bar mr-2"></i>Check Stats
+              </button>
+            </div>
+          </form>
+          
+          <div id="stats-result" class="mt-4"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Secure Share Tab -->
+    <div id="share-tab" class="tab-content">
+      <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+        <h2 class="text-2xl font-bold text-center mb-6">
+          <i class="fas fa-shield-alt text-green-600 mr-2"></i>Secure Share
+        </h2>
+        
+        <div class="info-box">
+          <p class="font-medium">Share files, links, or text securely with a secret code</p>
+          <p class="text-sm text-gray-600 mt-1">Content is stored for 24 hours and accessible only with the secret code</p>
+        </div>
+
+        <!-- Share Type Selector -->
+        <div class="mb-6">
+          <label class="block text-sm font-medium mb-3">What would you like to share?</label>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <button onclick="selectShareType('link')" class="feature-card text-center hover:bg-blue-50" id="link-share-btn">
+              <i class="fas fa-link text-blue-600 text-3xl mb-3"></i>
+              <h3 class="font-bold">Link/URL</h3>
+              <p class="text-sm text-gray-600 mt-2">Share website links</p>
+            </button>
+            
+            <button onclick="selectShareType('file')" class="feature-card text-center hover:bg-green-50" id="file-share-btn">
+              <i class="fas fa-file-upload text-green-600 text-3xl mb-3"></i>
+              <h3 class="font-bold">File</h3>
+              <p class="text-sm text-gray-600 mt-2">Share any file (max 10MB)</p>
+            </button>
+            
+            <button onclick="selectShareType('text')" class="feature-card text-center hover:bg-purple-50" id="text-share-btn">
+              <i class="fas fa-font text-purple-600 text-3xl mb-3"></i>
+              <h3 class="font-bold">Text</h3>
+              <p class="text-sm text-gray-600 mt-2">Share notes or messages</p>
+            </button>
+          </div>
+        </div>
+
+        <!-- Share Forms -->
+        <div id="share-forms">
+          <!-- Link Form (default) -->
+          <div id="link-form" class="share-form">
+            <form id="link-share-form" onsubmit="shareLink(event)">
+              <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">Enter URL to share</label>
+                <input type="url" 
+                       id="share-url" 
+                       placeholder="https://example.com"
+                       class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                       required>
+              </div>
+              <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">Optional: Set a password (extra security)</label>
+                <input type="password" 
+                       id="link-password"
+                       placeholder="Leave empty for no password"
+                       class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+              </div>
+              <button type="submit" class="btn-primary w-full">
+                <i class="fas fa-lock mr-2"></i>Generate Secure Share Code
+              </button>
+            </form>
+          </div>
+
+          <!-- File Form (hidden by default) -->
+          <div id="file-form" class="share-form hidden">
+            <form id="file-share-form" onsubmit="shareFile(event)">
+              <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">Select file to share (max 10MB)</label>
+                <div id="file-share-dropzone" class="dropzone">
+                  <p class="text-gray-600">Drag & drop file here</p>
+                  <p class="text-sm text-gray-500 mt-1">or click to select</p>
+                  <input type="file" id="share-file-input" class="hidden">
+                </div>
+                <div id="file-share-preview" class="mt-3 hidden">
+                  <p class="text-sm text-gray-700"><span id="file-name"></span> (<span id="file-size"></span>)</p>
+                </div>
+              </div>
+              <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">Optional: Set a password</label>
+                <input type="password" 
+                       id="file-password"
+                       placeholder="Leave empty for no password"
+                       class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+              </div>
+              <button type="submit" class="btn-primary w-full">
+                <i class="fas fa-lock mr-2"></i>Generate Secure Share Code
+              </button>
+            </form>
+          </div>
+
+          <!-- Text Form (hidden by default) -->
+          <div id="text-form" class="share-form hidden">
+            <form id="text-share-form" onsubmit="shareText(event)">
+              <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">Enter text to share</label>
+                <textarea id="share-text" 
+                          rows="6"
+                          placeholder="Enter your message, note, or any text content here..."
+                          class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          required></textarea>
+              </div>
+              <div class="mb-4">
+                <label class="block text-sm font-medium mb-2">Optional: Set a password</label>
+                <input type="password" 
+                       id="text-password"
+                       placeholder="Leave empty for no password"
+                       class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
+              </div>
+              <button type="submit" class="btn-primary w-full">
+                <i class="fas fa-lock mr-2"></i>Generate Secure Share Code
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Share Result -->
+        <div id="share-result" class="mt-8 text-center min-h-20">
+          <p class="text-gray-500">Your secure share code will appear here...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Retrieve Content Tab -->
+    <div id="retrieve-tab" class="tab-content">
+      <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+        <h2 class="text-2xl font-bold text-center mb-6">
+          <i class="fas fa-unlock-alt text-purple-600 mr-2"></i>Retrieve Content
+        </h2>
+        
+        <div class="info-box">
+          <p class="font-medium">Enter a secret code to retrieve shared content</p>
+          <p class="text-sm text-gray-600 mt-1">Content is automatically deleted after 24 hours for security</p>
+        </div>
+
+        <form id="retrieve-form" onsubmit="retrieveContent(event)">
+          <div class="mb-6">
+            <label class="block text-sm font-medium mb-2">Enter Secret Code</label>
+            <input type="text" 
+                   id="retrieve-code"
+                   placeholder="e.g., ABCD-EFGH-IJKL"
+                   class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-center text-lg tracking-wider"
+                   required>
+          </div>
+          
+          <div id="password-section" class="mb-6 hidden">
+            <label class="block text-sm font-medium mb-2">Password Required</label>
+            <input type="password" 
+                   id="retrieve-password"
+                   placeholder="Enter the password for this content"
+                   class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent">
+          </div>
+          
+          <button type="submit" class="btn-primary w-full">
+            <i class="fas fa-search mr-2"></i>Retrieve Content
+          </button>
+        </form>
+
+        <!-- Retrieve Result -->
+        <div id="retrieve-result" class="mt-8 min-h-20">
+          <p class="text-gray-500 text-center">Retrieved content will appear here...</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- About Tab -->
+    <div id="about-tab" class="tab-content">
+      <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+        <h2 class="text-2xl font-bold text-center mb-6">
+          <i class="fas fa-info-circle text-gray-600 mr-2"></i>About Secure Share Portal v3.0
+        </h2>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="feature-card">
+            <h3 class="font-bold text-xl mb-3">
+              <i class="fas fa-qrcode text-blue-600 mr-2"></i>QR Code Generator
+            </h3>
+            <ul class="space-y-2 text-gray-700">
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Generate QR codes from URLs or files</li>
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Customize with logo overlay</li>
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Adjust logo size and background</li>
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Download high-quality PNG images</li>
+            </ul>
+          </div>
+          
+          <div class="feature-card">
+            <h3 class="font-bold text-xl mb-3">
+              <i class="fas fa-link text-yellow-600 mr-2"></i>URL Shortener
+            </h3>
+            <ul class="space-y-2 text-gray-700">
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Shorten long URLs instantly</li>
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Custom codes (4-12 characters)</li>
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Track click statistics</li>
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Generate QR for short URLs</li>
+            </ul>
+          </div>
+          
+          <div class="feature-card">
+            <h3 class="font-bold text-xl mb-3">
+              <i class="fas fa-shield-alt text-green-600 mr-2"></i>Secure Sharing
+            </h3>
+            <ul class="space-y-2 text-gray-700">
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Share links, files, or text securely</li>
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Generate unique secret codes</li>
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Optional password protection</li>
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Auto-expire after 24 hours</li>
+            </ul>
+          </div>
+          
+          <div class="feature-card">
+            <h3 class="font-bold text-xl mb-3">
+              <i class="fas fa-lock text-red-600 mr-2"></i>Security & Privacy
+            </h3>
+            <ul class="space-y-2 text-gray-700">
+              <li><i class="fas fa-check text-green-500 mr-2"></i>No permanent storage</li>
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Encrypted transfers</li>
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Password protection option</li>
+              <li><i class="fas fa-check text-green-500 mr-2"></i>Automatic cleanup (24h)</li>
+            </ul>
+          </div>
+        </div>
+        
+        <div class="mt-8 text-center">
+          <p class="text-gray-600">Built with Flask • Secure by design • All-in-One Tool</p>
+          <p class="text-sm text-gray-500 mt-2">All shared content and shortened URLs are automatically deleted after 24 hours</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="text-center mt-12 pt-8 border-t border-gray-300">
+      <p class="text-gray-600">Secure Share Portal v3.0 • Made with ❤️ for secure sharing</p>
+      <p class="text-sm text-gray-500 mt-2">
+        <i class="fas fa-clock mr-1"></i>Content expires after 24 hours • 
+        <i class="fas fa-shield-alt mx-1"></i>Secure transfers • 
+        <i class="fas fa-link mx-1"></i>URL Shortener • 
+        <i class="fas fa-code mx-1"></i>No registration required
+      </p>
+    </footer>
+  </div>
+
+<script>
+  // Tab switching
+  function switchTab(tabId) {
+    document.querySelectorAll('.tab-content').forEach(tab => {
+      tab.classList.remove('active');
+    });
+    
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.classList.remove('active');
+    });
+    
+    document.getElementById(tabId).classList.add('active');
+    event.target.classList.add('active');
+    
+    if (tabId === 'retrieve-tab') {
+      document.getElementById('retrieve-result').innerHTML = 
+        '<p class="text-gray-500 text-center">Retrieved content will appear here...</p>';
+    }
+  }
+
+  // URL Shortener Functions
+  async function shortenUrl(e) {
+    e.preventDefault();
+    
+    const url = document.getElementById('url-to-shorten').value;
+    const customCode = document.getElementById('custom-code').value.trim();
+    
+    if (!url) {
+      alert('Please enter a URL to shorten');
+      return;
+    }
+    
+    const shortenResult = document.getElementById('shorten-result');
+    shortenResult.innerHTML = '<p class="text-yellow-600">Shortening URL...</p>';
+    
+    try {
+      const response = await fetch('/shorten', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: url,
+          custom_code: customCode
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        shortenResult.innerHTML = `
+          <div class="bg-yellow-50 p-4 rounded-lg">
+            <div class="short-url-code text-center">
+              <p class="text-sm text-gray-600 mb-1">Your Short URL Code:</p>
+              <div class="text-2xl font-bold tracking-widest">${result.short_code}</div>
+              <button onclick="copyToClipboard('${result.short_code}')" class="copy-btn mt-2">
+                <i class="fas fa-copy mr-1"></i>Copy Code
+              </button>
+            </div>
+            
+            <div class="mt-4">
+              <p class="text-sm text-gray-600 mb-1">Shortened URL:</p>
+              <div class="shortened-url">
+                <a href="${result.short_url}" target="_blank" class="text-yellow-600 hover:underline font-medium">${result.short_url}</a>
+                <button onclick="copyToClipboard('${result.short_url}')" class="copy-btn ml-2">
+                  <i class="fas fa-copy mr-1"></i>Copy
+                </button>
+              </div>
+            </div>
+            
+            <div class="mt-4">
+              <p class="text-sm text-gray-600 mb-1">Original URL:</p>
+              <p class="text-sm text-gray-500 break-all">${result.original_url}</p>
+            </div>
+            
+            <div class="mt-4 text-sm text-gray-600">
+              <p><i class="fas fa-clock mr-2"></i>Expires in 24 hours</p>
+              <p><i class="fas fa-mouse-pointer mr-2"></i>0 clicks so far</p>
+            </div>
+            
+            <div class="mt-4 flex gap-2">
+              <button onclick="generateQRForShortURL('${result.short_url}')" class="btn-secondary flex-1">
+                <i class="fas fa-qrcode mr-2"></i>Generate QR
+              </button>
+              <button onclick="checkStatsNow('${result.short_code}')" class="btn-primary flex-1">
+                <i class="fas fa-chart-bar mr-2"></i>View Stats
+              </button>
+            </div>
+          </div>
+        `;
+      } else {
+        shortenResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">Error: ${result.error}</p>`;
+      }
+    } catch (error) {
+      shortenResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">Network error: ${error}</p>`;
+    }
+  }
+
+  function checkStatsNow(shortCode) {
+    document.getElementById('stats-code').value = shortCode;
+    checkStats(event);
+  }
+
+  async function checkStats(e) {
+    e.preventDefault();
+    
+    const shortCode = document.getElementById('stats-code').value.trim().toLowerCase();
+    
+    if (!shortCode) {
+      alert('Please enter a short code');
+      return;
+    }
+    
+    const statsResult = document.getElementById('stats-result');
+    statsResult.innerHTML = '<p class="text-yellow-600">Loading stats...</p>';
+    
+    try {
+      const response = await fetch('/shorten/stats', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code: shortCode
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        const createdDate = new Date(result.created_at * 1000).toLocaleString();
+        const expiresDate = new Date(result.expires_at * 1000).toLocaleString();
+        
+        statsResult.innerHTML = `
+          <div class="stats-box p-4 rounded-lg">
+            <h4 class="font-bold mb-3">Stats for: ${result.short_code}</h4>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <p class="text-sm text-gray-600">Total Clicks:</p>
+                <p class="text-lg font-bold">${result.visits}</p>
+              </div>
+              <div>
+                <p class="text-sm text-gray-600">Created:</p>
+                <p class="text-sm">${createdDate}</p>
+              </div>
+              <div>
+                <p class="text-sm text-gray-600">Expires:</p>
+                <p class="text-sm">${expiresDate}</p>
+              </div>
+              <div>
+                <p class="text-sm text-gray-600">Short URL:</p>
+                <a href="${result.short_url}" target="_blank" class="text-sm text-yellow-600 hover:underline">${result.short_url}</a>
+              </div>
+            </div>
+            <div class="mt-3">
+              <p class="text-sm text-gray-600 mb-1">Original URL:</p>
+              <p class="text-xs text-gray-500 break-all">${result.original_url}</p>
+            </div>
+            <div class="mt-3 flex gap-2">
+              <button onclick="copyToClipboard('${result.short_url}')" class="copy-btn">
+                <i class="fas fa-copy mr-1"></i>Copy URL
+              </button>
+              <button onclick="generateQRForShortURL('${result.short_url}')" class="btn-secondary">
+                <i class="fas fa-qrcode mr-1"></i>Generate QR
+              </button>
+            </div>
+          </div>
+        `;
+      } else {
+        statsResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">${result.error}</p>`;
+      }
+    } catch (error) {
+      statsResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">Network error: ${error}</p>`;
+    }
+  }
+
+  function generateQRForShortURL(shortUrl) {
+    const urlInput = document.querySelector('input[name="url"]');
+    urlInput.value = shortUrl;
+    switchTab('qr-tab');
+    setTimeout(() => {
+      htmx.trigger(urlInput, 'change');
+    }, 300);
+  }
+
+  // Share type selection
+  function selectShareType(type) {
+    document.getElementById('link-share-btn').classList.remove('bg-blue-50', 'border-blue-300');
+    document.getElementById('file-share-btn').classList.remove('bg-green-50', 'border-green-300');
+    document.getElementById('text-share-btn').classList.remove('bg-purple-50', 'border-purple-300');
+    
+    document.querySelectorAll('.share-form').forEach(form => {
+      form.classList.add('hidden');
+    });
+    
+    document.getElementById(`${type}-form`).classList.remove('hidden');
+    document.getElementById(`${type}-share-btn`).classList.add('bg-blue-50', 'border', 'border-blue-300');
+  }
+
+  // Initialize link as default
+  document.addEventListener('DOMContentLoaded', function() {
+    selectShareType('link');
+  });
+
+  // Share Link
+  async function shareLink(e) {
+    e.preventDefault();
+    
+    const url = document.getElementById('share-url').value;
+    const password = document.getElementById('link-password').value;
+    
+    if (!url) {
+      alert('Please enter a URL');
+      return;
+    }
+    
+    const shareResult = document.getElementById('share-result');
+    shareResult.innerHTML = '<p class="text-blue-600">Generating secure code...</p>';
+    
+    const formData = new FormData();
+    formData.append('type', 'link');
+    formData.append('content', url);
+    if (password) formData.append('password', password);
+    
+    try {
+      const response = await fetch('/share', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        const shareUrl = window.location.origin + '/retrieve/' + result.code;
+        shareResult.innerHTML = `
+          <div class="bg-green-50 p-4 rounded-lg">
+            <div class="secret-code text-center">
+              <p class="text-sm text-gray-600 mb-1">Your Secret Code:</p>
+              <div class="text-2xl font-bold tracking-widest">${result.code}</div>
+              <button onclick="copyToClipboard('${result.code}')" class="copy-btn mt-2">
+                <i class="fas fa-copy mr-1"></i>Copy Code
+              </button>
+            </div>
+            
+            <div class="mt-4">
+              <p class="text-sm text-gray-600 mb-1">Share this link:</p>
+              <div class="share-link">
+                <a href="${shareUrl}" target="_blank" class="text-blue-600 hover:underline">${shareUrl}</a>
+                <button onclick="copyToClipboard('${shareUrl}')" class="copy-btn ml-2">
+                  <i class="fas fa-copy mr-1"></i>Copy
+                </button>
+              </div>
+            </div>
+            
+            <div class="mt-4 text-sm text-gray-600">
+              <p><i class="fas fa-clock mr-2"></i>Expires in 24 hours</p>
+              <p><i class="fas fa-key mr-2"></i>${password ? 'Password protected' : 'No password required'}</p>
+            </div>
+            
+            <div class="mt-4">
+              <button onclick="generateQRForShare('${shareUrl}')" class="btn-secondary mr-2">
+                <i class="fas fa-qrcode mr-2"></i>Generate QR
+              </button>
+              <button onclick="shortenShareURL('${shareUrl}')" class="btn-warning">
+                <i class="fas fa-link mr-2"></i>Shorten This
+              </button>
+            </div>
+          </div>
+        `;
+      } else {
+        shareResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">Error: ${result.error}</p>`;
+      }
+    } catch (error) {
+      shareResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">Network error: ${error}</p>`;
+    }
+  }
+
+  function shortenShareURL(shareUrl) {
+    document.getElementById('url-to-shorten').value = shareUrl;
+    switchTab('shorten-tab');
+    setTimeout(() => {
+      document.getElementById('shorten-form').scrollIntoView({ behavior: 'smooth' });
+    }, 300);
+  }
+
+  // File share dropzone
+  const fileShareDropzone = document.getElementById('file-share-dropzone');
+  const fileShareInput = document.getElementById('share-file-input');
+  
+  fileShareDropzone.addEventListener('click', () => fileShareInput.click());
+  fileShareInput.addEventListener('change', handleFileSelect);
+  
+  function handleFileSelect(e) {
+    const file = e.target.files[0];
+    if (file) {
+      const preview = document.getElementById('file-share-preview');
+      document.getElementById('file-name').textContent = file.name;
+      document.getElementById('file-size').textContent = formatFileSize(file.size);
+      preview.classList.remove('hidden');
+    }
+  }
+  
+  function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' bytes';
+    else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    else return (bytes / 1048576).toFixed(1) + ' MB';
+  }
+
+  // Share File
+  async function shareFile(e) {
+    e.preventDefault();
+    
+    const fileInput = document.getElementById('share-file-input');
+    const password = document.getElementById('file-password').value;
+    
+    if (!fileInput.files.length) {
+      alert('Please select a file');
+      return;
+    }
+    
+    const file = fileInput.files[0];
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File too large! Maximum size is 10MB');
+      return;
+    }
+    
+    const shareResult = document.getElementById('share-result');
+    shareResult.innerHTML = '<p class="text-blue-600">Uploading and generating secure code...</p>';
+    
+    const formData = new FormData();
+    formData.append('type', 'file');
+    formData.append('file', file);
+    formData.append('filename', file.name);
+    if (password) formData.append('password', password);
+    
+    try {
+      const response = await fetch('/share', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        const shareUrl = window.location.origin + '/retrieve/' + result.code;
+        shareResult.innerHTML = `
+          <div class="bg-green-50 p-4 rounded-lg">
+            <div class="secret-code text-center">
+              <p class="text-sm text-gray-600 mb-1">Your Secret Code:</p>
+              <div class="text-2xl font-bold tracking-widest">${result.code}</div>
+              <button onclick="copyToClipboard('${result.code}')" class="copy-btn mt-2">
+                <i class="fas fa-copy mr-1"></i>Copy Code
+              </button>
+            </div>
+            
+            <div class="mt-4">
+              <p class="text-sm text-gray-600">File: <span class="font-medium">${file.name}</span> (${formatFileSize(file.size)})</p>
+              <p class="text-sm text-gray-600 mt-1">Share this link:</p>
+              <div class="share-link">
+                <a href="${shareUrl}" target="_blank" class="text-blue-600 hover:underline">${shareUrl}</a>
+                <button onclick="copyToClipboard('${shareUrl}')" class="copy-btn ml-2">
+                  <i class="fas fa-copy mr-1"></i>Copy
+                </button>
+              </div>
+            </div>
+            
+            <div class="mt-4 text-sm text-gray-600">
+              <p><i class="fas fa-clock mr-2"></i>Expires in 24 hours</p>
+              <p><i class="fas fa-key mr-2"></i>${password ? 'Password protected' : 'No password required'}</p>
+            </div>
+          </div>
+        `;
+      } else {
+        shareResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">Error: ${result.error}</p>`;
+      }
+    } catch (error) {
+      shareResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">Network error: ${error}</p>`;
+    }
+  }
+
+  // Share Text
+  async function shareText(e) {
+    e.preventDefault();
+    
+    const text = document.getElementById('share-text').value;
+    const password = document.getElementById('text-password').value;
+    
+    if (!text.trim()) {
+      alert('Please enter some text');
+      return;
+    }
+    
+    const shareResult = document.getElementById('share-result');
+    shareResult.innerHTML = '<p class="text-blue-600">Generating secure code...</p>';
+    
+    const formData = new FormData();
+    formData.append('type', 'text');
+    formData.append('content', text);
+    if (password) formData.append('password', password);
+    
+    try {
+      const response = await fetch('/share', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        const shareUrl = window.location.origin + '/retrieve/' + result.code;
+        shareResult.innerHTML = `
+          <div class="bg-green-50 p-4 rounded-lg">
+            <div class="secret-code text-center">
+              <p class="text-sm text-gray-600 mb-1">Your Secret Code:</p>
+              <div class="text-2xl font-bold tracking-widest">${result.code}</div>
+              <button onclick="copyToClipboard('${result.code}')" class="copy-btn mt-2">
+                <i class="fas fa-copy mr-1"></i>Copy Code
+              </button>
+            </div>
+            
+            <div class="mt-4">
+              <p class="text-sm text-gray-600 mb-1">Share this link:</p>
+              <div class="share-link">
+                <a href="${shareUrl}" target="_blank" class="text-blue-600 hover:underline">${shareUrl}</a>
+                <button onclick="copyToClipboard('${shareUrl}')" class="copy-btn ml-2">
+                  <i class="fas fa-copy mr-1"></i>Copy
+                </button>
+              </div>
+            </div>
+            
+            <div class="mt-4 text-sm text-gray-600">
+              <p><i class="fas fa-clock mr-2"></i>Expires in 24 hours</p>
+              <p><i class="fas fa-key mr-2"></i>${password ? 'Password protected' : 'No password required'}</p>
+            </div>
+          </div>
+        `;
+      } else {
+        shareResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">Error: ${result.error}</p>`;
+      }
+    } catch (error) {
+      shareResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">Network error: ${error}</p>`;
+    }
+  }
+
+  // Retrieve Content
+  async function retrieveContent(e) {
+    e.preventDefault();
+    
+    const code = document.getElementById('retrieve-code').value.trim();
+    const password = document.getElementById('retrieve-password').value;
+    
+    if (!code) {
+      alert('Please enter a secret code');
+      return;
+    }
+    
+    const retrieveResult = document.getElementById('retrieve-result');
+    retrieveResult.innerHTML = '<p class="text-blue-600">Retrieving content...</p>';
+    
+    try {
+      const response = await fetch('/retrieve', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          code: code,
+          password: password
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        switch(result.type) {
+          case 'link':
+            retrieveResult.innerHTML = `
+              <div class="bg-green-50 p-4 rounded-lg">
+                <h3 class="font-bold text-lg mb-3">
+                  <i class="fas fa-link text-blue-600 mr-2"></i>Shared Link
+                </h3>
+                <p class="mb-3">Click the link below to visit the shared URL:</p>
+                <div class="share-link">
+                  <a href="${result.content}" target="_blank" class="text-blue-600 hover:underline font-medium">${result.content}</a>
+                </div>
+                <button onclick="window.open('${result.content}', '_blank')" class="btn-primary mt-4 mr-2">
+                  <i class="fas fa-external-link-alt mr-2"></i>Open Link
+                </button>
+                <button onclick="shortenRetrievedURL('${result.content}')" class="btn-warning mt-4">
+                  <i class="fas fa-link mr-2"></i>Shorten This
+                </button>
+                <p class="text-sm text-gray-600 mt-4">
+                  <i class="fas fa-clock mr-1"></i>
+                  Expires: ${new Date(result.expires * 1000).toLocaleString()}
+                </p>
+              </div>
+            `;
+            break;
+            
+          case 'file':
+            retrieveResult.innerHTML = `
+              <div class="bg-green-50 p-4 rounded-lg">
+                <h3 class="font-bold text-lg mb-3">
+                  <i class="fas fa-file text-green-600 mr-2"></i>Shared File
+                </h3>
+                <p class="mb-2">File: <span class="font-medium">${result.filename}</span></p>
+                <p class="mb-4 text-sm text-gray-600">Size: ${formatFileSize(result.size)}</p>
+                <button onclick="downloadFile('${result.code}')" class="btn-primary">
+                  <i class="fas fa-download mr-2"></i>Download File
+                </button>
+                <p class="text-sm text-gray-600 mt-4">
+                  <i class="fas fa-clock mr-1"></i>
+                  Expires: ${new Date(result.expires * 1000).toLocaleString()}
+                </p>
+              </div>
+            `;
+            break;
+            
+          case 'text':
+            retrieveResult.innerHTML = `
+              <div class="bg-green-50 p-4 rounded-lg">
+                <h3 class="font-bold text-lg mb-3">
+                  <i class="fas fa-font text-purple-600 mr-2"></i>Shared Text
+                </h3>
+                <div class="bg-white p-4 rounded border border-gray-300 max-h-96 overflow-y-auto">
+                  <pre class="whitespace-pre-wrap">${result.content}</pre>
+                </div>
+                <button onclick="copyToClipboard('${result.content.replace(/'/g, "\\'")}')" class="copy-btn mt-4">
+                  <i class="fas fa-copy mr-1"></i>Copy Text
+                </button>
+                <p class="text-sm text-gray-600 mt-4">
+                  <i class="fas fa-clock mr-1"></i>
+                  Expires: ${new Date(result.expires * 1000).toLocaleString()}
+                </p>
+              </div>
+            `;
+            break;
+        }
+      } else {
+        if (result.requires_password) {
+          document.getElementById('password-section').classList.remove('hidden');
+          retrieveResult.innerHTML = '<p class="text-yellow-600 bg-yellow-50 p-3 rounded">Password required. Please enter it above.</p>';
+        } else {
+          retrieveResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">${result.error}</p>`;
+        }
+      }
+    } catch (error) {
+      retrieveResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">Network error: ${error}</p>`;
+    }
+  }
+
+  function shortenRetrievedURL(url) {
+    document.getElementById('url-to-shorten').value = url;
+    switchTab('shorten-tab');
+    setTimeout(() => {
+      document.getElementById('shorten-form').scrollIntoView({ behavior: 'smooth' });
+    }, 300);
+  }
+
+  // Generate QR for share link
+  function generateQRForShare(shareUrl) {
+    const urlInput = document.querySelector('input[name="url"]');
+    urlInput.value = shareUrl;
+    switchTab('qr-tab');
+    setTimeout(() => {
+      htmx.trigger(urlInput, 'change');
+    }, 300);
+  }
+
+  // Download file
+  async function downloadFile(code) {
+    try {
+      const response = await fetch(`/download/${code}`);
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `shared_file_${code}.bin`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      } else {
+        alert('Error downloading file');
+      }
+    } catch (error) {
+      alert('Download error: ' + error);
+    }
+  }
+
+  // Copy to clipboard
+  function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = event.target;
+      const original = btn.innerHTML;
+      btn.innerHTML = '<i class="fas fa-check mr-1"></i>Copied!';
+      btn.classList.remove('bg-gray-600');
+      btn.classList.add('bg-green-600');
+      setTimeout(() => {
+        btn.innerHTML = original;
+        btn.classList.remove('bg-green-600');
+        btn.classList.add('bg-gray-600');
+      }, 2000);
+    });
+  }
+
+  // --- Original QR Code Functions ---
+  
+  document.addEventListener('DOMContentLoaded', function() {
+    const urlInput = document.querySelector('input[name="url"]');
+    
+    setTimeout(() => {
+      if (urlInput.value.trim()) {
+        htmx.trigger(urlInput, 'change');
+      }
+    }, 500);
+
+    urlInput.addEventListener('input', function() {
+      const convertBtn = document.getElementById('convert-btn');
+      convertBtn.disabled = !this.value.trim();
+    });
+  });
+
+  function convertUrlToQR() {
+    const urlInput = document.querySelector('input[name="url"]');
+    const url = urlInput.value.trim();
+    
+    if (!url) {
+      alert('Please enter a URL first!');
+      urlInput.focus();
+      return;
+    }
+
+    const qrResult = document.getElementById('qr-result');
+    qrResult.innerHTML = '<p class="text-blue-600">Generating QR code...</p>';
+
+    const formData = new FormData();
+    formData.append('url', url);
+    
+    const logoSize = document.getElementById('logo-size').value;
+    formData.append('logo_size', logoSize);
+    formData.append('logo_bg', document.getElementById('logo-bg').checked ? '1' : '0');
+    
+    const logoInput = document.getElementById('logo-input');
+    if (logoInput.files.length > 0) {
+      formData.append('logo', logoInput.files[0]);
+    }
+
+    fetch('/qr/url', {
+      method: 'POST',
+      body: formData
+    })
+    .then(response => response.text())
+    .then(html => {
+      qrResult.innerHTML = html;
+      if (html.includes('data:image/png;base64')) {
+        showDownloadButton(html);
+      }
+    })
+    .catch(error => {
+      qrResult.innerHTML = '<p class="text-red-600">Error generating QR code: ' + error + '</p>';
+    });
+  }
+
+  function showDownloadButton(html) {
+    const downloadSection = document.getElementById('download-section');
+    const downloadBtn = document.getElementById('download-btn');
+    
+    downloadSection.classList.remove('hidden');
+    
+    const match = html.match(/data:image\/png;base64,([^"]+)/);
+    if (match) {
+      const base64Data = match[1];
+      downloadBtn.onclick = function() {
+        const link = document.createElement('a');
+        link.download = 'qrcode_with_logo.png';
+        link.href = 'data:image/png;base64,' + base64Data;
+        link.click();
+      };
+    }
+  }
+
+  // Logo Upload Handling
+  const logoDropzone = document.getElementById('logo-dropzone');
+  const logoInput = document.getElementById('logo-input');
+  const logoPreview = document.getElementById('logo-preview');
+  const logoPreviewContainer = document.getElementById('logo-preview-container');
+
+  ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+    logoDropzone.addEventListener(eventName, preventDefaults, false);
+  });
+
+  ['dragenter', 'dragover'].forEach(eventName => {
+    logoDropzone.addEventListener(eventName, highlightLogoZone, false);
+  });
+
+  ['dragleave', 'drop'].forEach(eventName => {
+    logoDropzone.addEventListener(eventName, unhighlightLogoZone, false);
+  });
+
+  function highlightLogoZone() {
+    logoDropzone.classList.add('dragover');
+  }
+
+  function unhighlightLogoZone() {
+    logoDropzone.classList.remove('dragover');
+  }
+
+  logoDropzone.addEventListener('drop', handleLogoDrop, false);
+  logoDropzone.addEventListener('click', function() {
+    logoInput.click();
+  });
+
+  function handleLogoDrop(e) {
+    const dt = e.dataTransfer;
+    const files = dt.files;
+    
+    if (files.length) {
+      logoInput.files = files;
+      previewLogo(files[0]);
+      const urlInput = document.querySelector('input[name="url"]');
+      if (urlInput.value.trim()) {
+        setTimeout(() => htmx.trigger(urlInput, 'change'), 100);
+      }
+    }
+  }
+
+  logoInput.addEventListener('change', function() {
+    if (this.files.length) {
+      previewLogo(this.files[0]);
+      const urlInput = document.querySelector('input[name="url"]');
+      if (urlInput.value.trim()) {
+        setTimeout(() => htmx.trigger(urlInput, 'change'), 100);
+      }
+    }
+  });
+
+  function previewLogo(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      logoPreview.src = e.target.result;
+      logoPreviewContainer.classList.remove('hidden');
+      logoDropzone.classList.add('hidden');
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function removeLogo() {
+    logoInput.value = '';
+    logoPreviewContainer.classList.add('hidden');
+    logoDropzone.classList.remove('hidden');
+    const urlInput = document.querySelector('input[name="url"]');
+    if (urlInput.value.trim()) {
+      htmx.trigger(urlInput, 'change');
+    }
+  }
+
+  document.getElementById('logo-size').addEventListener('input', function() {
+    document.getElementById('logo-size-value').textContent = this.value + '%';
+  });
+
+  const dropzone = document.getElementById('dropzone');
+  const fileInput = document.getElementById('file-input');
+
+  function preventDefaults(e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+
+  function highlight() {
+    dropzone.classList.add('dragover');
+  }
+
+  function unhighlight() {
+    dropzone.classList.remove('dragover');
+  }
+
+  ['dragenter', 'dragover'].forEach(eventName => {
+    dropzone.addEventListener(eventName, highlight, false);
+  });
+
+  ['dragleave', 'drop'].forEach(eventName => {
+    dropzone.addEventListener(eventName, unhighlight, false);
+  });
+
+  dropzone.addEventListener('drop', handleDrop, false);
+
+  function handleDrop(e) {
+    const dt = e.dataTransfer;
+    const files = dt.files;
+    
+    if (files.length) {
+      fileInput.files = files;
+      handleFiles(files);
+    }
+  }
+
+  fileInput.addEventListener('change', function() {
+    if (this.files.length) {
+      handleFiles(this.files);
+    }
+  });
+
+  dropzone.addEventListener('click', function() {
+    fileInput.click();
+  });
+
+  function handleFiles(files) {
+    const file = files[0];
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const logoSize = document.getElementById('logo-size').value;
+    formData.append('logo_size', logoSize);
+    formData.append('logo_bg', document.getElementById('logo-bg').checked ? '1' : '0');
+    
+    if (logoInput.files.length > 0) {
+      formData.append('logo', logoInput.files[0]);
+    }
+
+    const qrResult = document.getElementById('qr-result');
+    qrResult.innerHTML = '<p class="text-blue-600">Generating QR code...</p>';
+
+    fetch('/qr/file', {
+      method: 'POST',
+      body: formData
+    })
+    .then(response => response.text())
+    .then(html => {
+      qrResult.innerHTML = html;
+      if (html.includes('data:image/png;base64')) {
+        showDownloadButton(html);
+      }
+    })
+    .catch(error => {
+      qrResult.innerHTML = '<p class="text-red-600">Error uploading file: ' + error + '</p>';
+    });
+  }
+
+  document.querySelector('input[name="url"]').addEventListener('keypress', function(e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      convertUrlToQR();
+    }
+  });
+</script>
+</body>
+</html>
