@@ -765,7 +765,7 @@
             <div class="secret-code text-center">
               <p class="text-sm text-gray-600 mb-1">Your Secret Code:</p>
               <div class="text-2xl font-bold tracking-widest">${result.code}</div>
-              <button onclick="copyToClipboard('${result.code}')" class="copy-btn mt-2">
+              <button onclick="copyToClipboard('${result.code}', this)" class="copy-btn mt-2">
                 <i class="fas fa-copy mr-1"></i>Copy Code
               </button>
             </div>
@@ -876,7 +876,7 @@
             <div class="secret-code text-center">
               <p class="text-sm text-gray-600 mb-1">Your Secret Code:</p>
               <div class="text-2xl font-bold tracking-widest">${result.code}</div>
-              <button onclick="copyToClipboard('${result.code}')" class="copy-btn mt-2">
+              <button onclick="copyToClipboard('${result.code}', this)" class="copy-btn mt-2">
                 <i class="fas fa-copy mr-1"></i>Copy Code
               </button>
             </div>
@@ -941,7 +941,7 @@
             <div class="secret-code text-center">
               <p class="text-sm text-gray-600 mb-1">Your Secret Code:</p>
               <div class="text-2xl font-bold tracking-widest">${result.code}</div>
-              <button onclick="copyToClipboard('${result.code}')" class="copy-btn mt-2">
+              <button onclick="copyToClipboard('${result.code}', this)" class="copy-btn mt-2">
                 <i class="fas fa-copy mr-1"></i>Copy Code
               </button>
             </div>
@@ -1033,7 +1033,7 @@
                 </h3>
                 <p class="mb-2">File: <span class="font-medium">${result.filename}</span></p>
                 <p class="mb-4 text-sm text-gray-600">Size: ${formatFileSize(result.size)}</p>
-                <button onclick="downloadFile('${result.code}')" class="btn-primary">
+                <button onclick="downloadFile('${code}')" class="btn-primary">
                   <i class="fas fa-download mr-2"></i>Download File
                 </button>
                 <p class="text-sm text-gray-600 mt-4">
@@ -1096,31 +1096,53 @@
   }
 
   // Download file
-  async function downloadFile(code) {
-    try {
-      const response = await fetch(`/download/${code}`);
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `shared_file_${code}.bin`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-      } else {
-        alert('Error downloading file');
-      }
-    } catch (error) {
-      alert('Download error: ' + error);
-    }
+async function downloadFile(code) {
+  if (!code || code === 'undefined') {
+    alert('Error: Invalid file code');
+    return;
   }
+  
+  try {
+    const response = await fetch(`/download/${code}`);
+    if (response.ok) {
+      // Get filename from response headers
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = `shared_file_${code}.bin`;
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = filenameMatch[1];
+        }
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } else if (response.status === 404) {
+      alert('File not found or has expired (24-hour limit)');
+    } else {
+      alert(`Error downloading file: ${response.status} ${response.statusText}`);
+    }
+  } catch (error) {
+    console.error('Download error:', error);
+    alert('Download error: ' + error.message);
+  }
+}
 
   // Copy to clipboard
-  function copyToClipboard(text) {
-    navigator.clipboard.writeText(text).then(() => {
-      const btn = event.target;
+function copyToClipboard(text, buttonElement) {
+  navigator.clipboard.writeText(text).then(() => {
+    // Show temporary success message
+    const btn = buttonElement || (window.event ? window.event.target : null);
+    
+    if (btn) {
       const original = btn.innerHTML;
       btn.innerHTML = '<i class="fas fa-check mr-1"></i>Copied!';
       btn.classList.remove('bg-gray-600');
@@ -1130,8 +1152,15 @@
         btn.classList.remove('bg-green-600');
         btn.classList.add('bg-gray-600');
       }, 2000);
-    });
-  }
+    } else {
+      // Fallback alert if button not found
+      alert('Copied to clipboard!');
+    }
+  }).catch(err => {
+    console.error('Failed to copy: ', err);
+    alert('Failed to copy to clipboard');
+  });
+}
 
   // --- Original QR Code Functions ---
   
