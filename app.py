@@ -9,6 +9,7 @@ import time
 import secrets
 import string
 from flask import Flask, render_template, request, jsonify, Response
+from flask import send_from_directory
 import qrcode
 from io import BytesIO
 from PIL import Image
@@ -322,5 +323,11 @@ def retrieve_page(code):
     """Direct page for retrieving content with a code"""
     return render_template("index.html")
 
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    return send_from_directory('static', filename)
+
+# Change the run section to:
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8000)), debug=True)
+    port = int(os.environ.get("PORT", 8000))
+    app.run(host="0.0.0.0", port=port, debug=False)
