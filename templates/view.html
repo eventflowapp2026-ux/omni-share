@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>View Shared Content - OmniShare</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    .content-box { max-width: 800px; margin: 2rem auto; }
+    .file-preview { max-height: 500px; overflow-y: auto; }
+    .link-preview { border-left: 4px solid #3b82f6; }
+    .text-preview { white-space: pre-wrap; font-family: monospace; }
+    .btn-primary { background: #3b82f6; color: white; padding: 0.75rem 1.5rem; border-radius: 6px; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-secondary { background: #10b981; color: white; padding: 0.75rem 1.5rem; border-radius: 6px; }
+    .btn-secondary:hover { background: #059669; }
+    .btn-warning { background: #f59e0b; color: white; padding: 0.75rem 1.5rem; border-radius: 6px; }
+    .btn-warning:hover { background: #d97706; }
+    .info-box { background: #f0f9ff; border-radius: 8px; padding: 1.5rem; margin: 1rem 0; }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div class="container mx-auto px-4 py-8">
+    <!-- Header -->
+    <header class="text-center mb-8">
+      <h1 class="text-3xl font-bold text-gray-800 mb-2">
+        <i class="fas fa-eye mr-2"></i>View Shared Content
+      </h1>
+      <p class="text-gray-600">Secure content shared via OmniShare</p>
+    </header>
+
+    <div id="content-container" class="content-box">
+      <!-- Content will be loaded here -->
+      <div class="text-center py-12">
+        <div class="inline-block animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mb-4"></div>
+        <p class="text-gray-600">Loading shared content...</p>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="text-center mt-12 pt-8 border-t border-gray-300">
+      <p class="text-gray-600">
+        <i class="fas fa-shield-alt mr-1"></i>Securely shared via 
+        <a href="/" class="text-blue-600 hover:underline">OmniShare</a>
+      </p>
+      <p class="text-sm text-gray-500 mt-2">
+        <i class="fas fa-clock mr-1"></i>Content expires after 24 hours
+      </p>
+      
+      <!-- Powered by EventFlow -->
+      <div class="mt-6 pt-4 border-t border-gray-200">
+        <div class="flex items-center justify-center gap-2">
+          <p class="text-gray-500 text-sm">Powered by</p>
+          <div class="flex items-center gap-1">
+            <img src="/static/eventflow-logo.png" alt="EventFlow" class="h-6">
+            <span class="font-bold text-blue-600">EventFlow</span>
+          </div>
+        </div>
+        <p class="text-xs text-gray-400 mt-1">Streamline your events with smart solutions</p>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    // Get the code from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const code = urlParams.get('code');
+    
+    if (!code) {
+      showError('No share code provided in URL');
+    } else {
+      loadContent(code);
+    }
+
+    async function loadContent(code) {
+      try {
+        const response = await fetch('/retrieve', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ code: code })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          displayContent(result);
+        } else {
+          if (result.requires_password) {
+            showPasswordPrompt(code);
+          } else {
+            showError(result.error || 'Failed to load content');
+          }
+        }
+      } catch (error) {
+        showError('Network error: ' + error.message);
+      }
+    }
+
+    function displayContent(data) {
+      const container = document.getElementById('content-container');
+      
+      const expires = new Date(data.expires * 1000).toLocaleString();
+      
+      let contentHtml = '';
+      
+      switch(data.type) {
+        case 'link':
+          contentHtml = `
+            <div class="bg-white rounded-lg shadow-lg p-6">
+              <div class="info-box link-preview">
+                <h2 class="text-xl font-bold mb-4">
+                  <i class="fas fa-link text-blue-600 mr-2"></i>Shared Link
+                </h2>
+                <p class="mb-4">Click the button below to visit the shared URL:</p>
+                
+                <div class="mb-6 p-4 bg-gray-50 rounded-lg">
+                  <p class="text-sm text-gray-600 mb-1">URL:</p>
+                  <p class="text-blue-600 break-all font-medium">${data.content}</p>
+                </div>
+                
+                <div class="flex flex-wrap gap-3">
+                  <button onclick="window.open('${data.content}', '_blank')" class="btn-primary">
+                    <i class="fas fa-external-link-alt mr-2"></i>Open Link
+                  </button>
+                  <button onclick="copyToClipboard('${data.content.replace(/'/g, "\\'")}')" class="btn-secondary">
+                    <i class="fas fa-copy mr-2"></i>Copy URL
+                  </button>
+                  <a href="/?code=${code}" class="btn-warning">
+                    <i class="fas fa-qrcode mr-2"></i>Generate QR Code
+                  </a>
+                </div>
+              </div>
+              
+              <div class="mt-6 text-sm text-gray-600">
+                <p><i class="fas fa-clock mr-2"></i>Expires: ${expires}</p>
+                <p><i class="fas fa-share-alt mr-2"></i>Share this link with others: 
+                  <span class="font-mono bg-gray-100 px-2 py-1 rounded">${window.location.origin}/view?code=${code}</span>
+                </p>
+              </div>
+            </div>
+          `;
+          break;
+          
+        case 'file':
+          contentHtml = `
+            <div class="bg-white rounded-lg shadow-lg p-6">
+              <div class="info-box">
+                <h2 class="text-xl font-bold mb-4">
+                  <i class="fas fa-file text-green-600 mr-2"></i>Shared File
+                </h2>
+                <div class="mb-6">
+                  <p class="mb-2"><span class="font-medium">Filename:</span> ${data.filename}</p>
+                  <p class="text-sm text-gray-600">Size: ${formatFileSize(data.size)}</p>
+                </div>
+                
+                <div class="mb-6">
+                  <p class="text-sm text-gray-600 mb-2">File Preview:</p>
+                  <div class="file-preview bg-gray-50 p-4 rounded-lg border border-gray-300">
+                    <p class="text-gray-500 italic">
+                      <i class="fas fa-info-circle mr-2"></i>
+                      ${getFilePreviewText(data.filename)}
+                    </p>
+                    ${getFilePreview(data.filename, data.content)}
+                  </div>
+                </div>
+                
+                <div class="flex flex-wrap gap-3">
+                  <button onclick="downloadFile('${code}')" class="btn-primary">
+                    <i class="fas fa-download mr-2"></i>Download File
+                  </button>
+                  <button onclick="copyShareLink('${code}')" class="btn-secondary">
+                    <i class="fas fa-copy mr-2"></i>Copy Share Link
+                  </button>
+                </div>
+              </div>
+              
+              <div class="mt-6 text-sm text-gray-600">
+                <p><i class="fas fa-clock mr-2"></i>Expires: ${expires}</p>
+                <p><i class="fas fa-shield-alt mr-2"></i>This file will be automatically deleted after 24 hours</p>
+              </div>
+            </div>
+          `;
+          break;
+          
+        case 'text':
+          contentHtml = `
+            <div class="bg-white rounded-lg shadow-lg p-6">
+              <div class="info-box">
+                <h2 class="text-xl font-bold mb-4">
+                  <i class="fas fa-font text-purple-600 mr-2"></i>Shared Text
+                </h2>
+                <div class="mb-6">
+                  <p class="text-sm text-gray-600 mb-2">Message:</p>
+                  <div class="text-preview bg-gray-50 p-4 rounded-lg border border-gray-300 max-h-96 overflow-y-auto">
+                    ${escapeHtml(data.content)}
+                  </div>
+                </div>
+                
+                <div class="flex flex-wrap gap-3">
+                  <button onclick="copyToClipboard('${escapeHtml(data.content).replace(/'/g, "\\'")}')" class="btn-primary">
+                    <i class="fas fa-copy mr-2"></i>Copy Text
+                  </button>
+                  <button onclick="copyShareLink('${code}')" class="btn-secondary">
+                    <i class="fas fa-link mr-2"></i>Copy Share Link
+                  </button>
+                  <a href="/" class="btn-warning">
+                    <i class="fas fa-home mr-2"></i>Back to Home
+                  </a>
+                </div>
+              </div>
+              
+              <div class="mt-6 text-sm text-gray-600">
+                <p><i class="fas fa-clock mr-2"></i>Expires: ${expires}</p>
+                <p><i class="fas fa-info-circle mr-2"></i>Character count: ${data.content.length}</p>
+              </div>
+            </div>
+          `;
+          break;
+      }
+      
+      container.innerHTML = contentHtml;
+    }
+
+    function showPasswordPrompt(code) {
+      const container = document.getElementById('content-container');
+      container.innerHTML = `
+        <div class="bg-white rounded-lg shadow-lg p-6 max-w-md mx-auto">
+          <h2 class="text-xl font-bold mb-4">
+            <i class="fas fa-lock text-yellow-600 mr-2"></i>Password Required
+          </h2>
+          <p class="mb-4 text-gray-600">This content is password protected. Please enter the password:</p>
+          
+          <div class="mb-4">
+            <input type="password" id="password-input" 
+                   class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                   placeholder="Enter password">
+          </div>
+          
+          <button onclick="submitPassword('${code}')" class="btn-primary w-full">
+            <i class="fas fa-unlock mr-2"></i>Access Content
+          </button>
+          
+          <p class="mt-4 text-sm text-gray-500">
+            <i class="fas fa-info-circle mr-1"></i>Contact the sender for the password
+          </p>
+        </div>
+      `;
+    }
+
+    async function submitPassword(code) {
+      const password = document.getElementById('password-input').value;
+      
+      if (!password) {
+        alert('Please enter a password');
+        return;
+      }
+      
+      try {
+        const response = await fetch('/retrieve', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            code: code,
+            password: password 
+          })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          displayContent(result);
+        } else {
+          showError('Incorrect password. Please try again.');
+        }
+      } catch (error) {
+        showError('Network error: ' + error.message);
+      }
+    }
+
+    function showError(message) {
+      const container = document.getElementById('content-container');
+      container.innerHTML = `
+        <div class="bg-white rounded-lg shadow-lg p-6 max-w-md mx-auto">
+          <div class="text-center">
+            <i class="fas fa-exclamation-triangle text-red-500 text-4xl mb-4"></i>
+            <h2 class="text-xl font-bold mb-2">Error</h2>
+            <p class="text-gray-600 mb-6">${message}</p>
+            <a href="/" class="btn-primary">
+              <i class="fas fa-home mr-2"></i>Back to Home
+            </a>
+          </div>
+        </div>
+      `;
+    }
+
+    // Helper functions
+    function formatFileSize(bytes) {
+      if (bytes < 1024) return bytes + ' bytes';
+      else if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+      else return (bytes / 1048576).toFixed(1) + ' MB';
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function getFilePreviewText(filename) {
+      const ext = filename.split('.').pop().toLowerCase();
+      if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
+        return 'Image preview available after download';
+      } else if (['pdf'].includes(ext)) {
+        return 'PDF document - download to view';
+      } else if (['txt', 'csv', 'json', 'xml'].includes(ext)) {
+        return 'Text file - download to view contents';
+      } else {
+        return 'Download to access file content';
+      }
+    }
+
+    function getFilePreview(filename, base64Content) {
+      const ext = filename.split('.').pop().toLowerCase();
+      
+      // For text-based files, show a preview
+      if (['txt', 'csv', 'json', 'xml', 'html', 'htm', 'js', 'css', 'py'].includes(ext)) {
+        try {
+          const text = atob(base64Content).substring(0, 1000);
+          return `<pre class="text-xs bg-gray-800 text-gray-100 p-3 rounded overflow-x-auto">${escapeHtml(text)}</pre>`;
+        } catch (e) {
+          return '<p class="text-gray-500">Cannot preview this file type</p>';
+        }
+      }
+      
+      return '';
+    }
+
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert('Copied to clipboard!');
+      }).catch(err => {
+        console.error('Failed to copy: ', err);
+        alert('Failed to copy to clipboard');
+      });
+    }
+
+    function copyShareLink(code) {
+      const shareLink = `${window.location.origin}/view?code=${code}`;
+      copyToClipboard(shareLink);
+    }
+
+    async function downloadFile(code) {
+      if (!code || code === 'undefined') {
+        alert('Error: Invalid file code');
+        return;
+      }
+      
+      try {
+        const response = await fetch(`/download/${code}`);
+        if (response.ok) {
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `shared_file_${code}.bin`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+        } else if (response.status === 404) {
+          alert('File not found or has expired (24-hour limit)');
+        } else {
+          alert(`Error downloading file: ${response.status} ${response.statusText}`);
+        }
+      } catch (error) {
+        console.error('Download error:', error);
+        alert('Download error: ' + error.message);
+      }
+    }
+  </script>
+</body>
+</html>

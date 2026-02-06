@@ -79,19 +79,19 @@
 
     <!-- Tabs Navigation -->
     <div class="flex flex-wrap justify-center gap-2 mb-8 bg-white rounded-lg p-2 shadow">
-      <button class="tab-btn active" onclick="switchTab('qr-tab')">
+      <button class="tab-btn active" onclick="switchTab('qr-tab', this)">
         <i class="fas fa-qrcode mr-2"></i>QR Generator
       </button>
-      <button class="tab-btn" onclick="switchTab('shorten-tab')">
+      <button class="tab-btn" onclick="switchTab('shorten-tab', this)">
         <i class="fas fa-link mr-2"></i>URL Shortener
       </button>
-      <button class="tab-btn" onclick="switchTab('share-tab')">
+    <button class="tab-btn" onclick="switchTab('share-tab', this)">
         <i class="fas fa-share-alt mr-2"></i>Secure Share
       </button>
-      <button class="tab-btn" onclick="switchTab('retrieve-tab')">
+      <button class="tab-btn" onclick="switchTab('retrieve-tab', this)">
         <i class="fas fa-key mr-2"></i>Retrieve
       </button>
-      <button class="tab-btn" onclick="switchTab('about-tab')">
+      <button class="tab-btn" onclick="switchTab('about-tab', this)">
         <i class="fas fa-info-circle mr-2"></i>About
       </button>
     </div>
@@ -523,28 +523,46 @@
         <i class="fas fa-link mx-1"></i>URL Shortener • 
         <i class="fas fa-code mx-1"></i>No registration required
       </p>
+      
+      <!-- Powered by EventFlow -->
+      <div class="mt-6 pt-4 border-t border-gray-200">
+        <div class="flex items-center justify-center gap-2">
+          <p class="text-gray-500 text-sm">Powered by</p>
+          <div class="flex items-center gap-1">
+            <img src="/static/eventflow-logo.png" alt="EventFlow" class="h-6">
+            <span class="font-bold text-blue-600">EventFlow</span>
+          </div>
+        </div>
+        <p class="text-xs text-gray-400 mt-1">Streamline your events with smart QR solutions</p>
+      </div>
     </footer>
   </div>
 
 <script>
+
   // Tab switching
-  function switchTab(tabId) {
-    document.querySelectorAll('.tab-content').forEach(tab => {
-      tab.classList.remove('active');
-    });
-    
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-      btn.classList.remove('active');
-    });
-    
-    document.getElementById(tabId).classList.add('active');
-    event.target.classList.add('active');
-    
-    if (tabId === 'retrieve-tab') {
-      document.getElementById('retrieve-result').innerHTML = 
-        '<p class="text-gray-500 text-center">Retrieved content will appear here...</p>';
-    }
+  function switchTab(tabId, clickedElement) {
+  document.querySelectorAll('.tab-content').forEach(tab => {
+    tab.classList.remove('active');
+  });
+  
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.remove('active');
+  });
+  
+  document.getElementById(tabId).classList.add('active');
+  
+  if (clickedElement) {
+    clickedElement.classList.add('active');
+  } else if (window.event && window.event.target) {
+    window.event.target.classList.add('active');
   }
+  
+  if (tabId === 'retrieve-tab') {
+    document.getElementById('retrieve-result').innerHTML = 
+      '<p class="text-gray-500 text-center">Retrieved content will appear here...</p>';
+  }
+}
 
   // URL Shortener Functions
   async function shortenUrl(e) {
@@ -759,7 +777,7 @@
       const result = await response.json();
       
       if (result.success) {
-        const shareUrl = window.location.origin + '/retrieve/' + result.code;
+        const shareUrl = window.location.origin + '/view?code=' + result.code;
         shareResult.innerHTML = `
           <div class="bg-green-50 p-4 rounded-lg">
             <div class="secret-code text-center">
@@ -774,7 +792,7 @@
               <p class="text-sm text-gray-600 mb-1">Share this link:</p>
               <div class="share-link">
                 <a href="${shareUrl}" target="_blank" class="text-blue-600 hover:underline">${shareUrl}</a>
-                <button onclick="copyToClipboard('${shareUrl}')" class="copy-btn ml-2">
+                <button onclick="copyToClipboard('${shareUrl}', this)" class="copy-btn ml-2">
                   <i class="fas fa-copy mr-1"></i>Copy
                 </button>
               </div>
@@ -870,7 +888,7 @@
       const result = await response.json();
       
       if (result.success) {
-        const shareUrl = window.location.origin + '/retrieve/' + result.code;
+        const shareUrl = window.location.origin + '/view?code=' + result.code;
         shareResult.innerHTML = `
           <div class="bg-green-50 p-4 rounded-lg">
             <div class="secret-code text-center">
@@ -886,7 +904,7 @@
               <p class="text-sm text-gray-600 mt-1">Share this link:</p>
               <div class="share-link">
                 <a href="${shareUrl}" target="_blank" class="text-blue-600 hover:underline">${shareUrl}</a>
-                <button onclick="copyToClipboard('${shareUrl}')" class="copy-btn ml-2">
+                <button onclick="copyToClipboard('${shareUrl}', this)" class="copy-btn ml-2">
                   <i class="fas fa-copy mr-1"></i>Copy
                 </button>
               </div>
@@ -935,7 +953,7 @@
       const result = await response.json();
       
       if (result.success) {
-        const shareUrl = window.location.origin + '/retrieve/' + result.code;
+        const shareUrl = window.location.origin + '/view?code=' + result.code;
         shareResult.innerHTML = `
           <div class="bg-green-50 p-4 rounded-lg">
             <div class="secret-code text-center">
@@ -950,7 +968,7 @@
               <p class="text-sm text-gray-600 mb-1">Share this link:</p>
               <div class="share-link">
                 <a href="${shareUrl}" target="_blank" class="text-blue-600 hover:underline">${shareUrl}</a>
-                <button onclick="copyToClipboard('${shareUrl}')" class="copy-btn ml-2">
+                <button onclick="copyToClipboard('${shareUrl}', this)" class="copy-btn ml-2">
                   <i class="fas fa-copy mr-1"></i>Copy
                 </button>
               </div>
@@ -1076,6 +1094,12 @@
       retrieveResult.innerHTML = `<p class="text-red-600 bg-red-50 p-3 rounded">Network error: ${error}</p>`;
     }
   }
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
 
   function shortenRetrievedURL(url) {
     document.getElementById('url-to-shorten').value = url;
