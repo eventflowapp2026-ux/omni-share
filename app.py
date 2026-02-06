@@ -8,22 +8,26 @@ import base64
 import time
 import secrets
 import string
-from flask import Flask, render_template, request, jsonify, Response
-from flask import send_from_directory
-import qrcode
-from flask_cors import CORS
-from io import BytesIO
-from PIL import Image
 from flask import Flask, render_template, request, jsonify, Response, redirect
 from flask import send_from_directory
+import qrcode
+from io import BytesIO
+from PIL import Image
 
 app = Flask(__name__)
-CORS(app)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+
+# Add CORS headers to all responses
+@app.after_request
+def after_request(response):
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+    response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
+    return response
 
 # In-memory storage (use database in production)
 shared_items = {}
-shortened_urls = {}
+shortened_urls = {}  # Add this for URL shortener
 MAX_STORAGE_DURATION = 24 * 3600  # 24 hours in seconds
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
@@ -40,18 +44,52 @@ def generate_short_code(length=6):
     return ''.join(secrets.choice(chars) for _ in range(length))
 
 def cleanup_expired():
-    """Remove expired shared items"""
+    """Remove expired shared items and shortened URLs"""
     current_time = time.time()
-    expired = [code for code, item in shared_items.items() 
-               if current_time - item['timestamp'] > MAX_STORAGE_DURATION]
-    for code in expired:
+    
+    # Clean shared items
+    expired_items = [code for code, item in shared_items.items() 
+                     if current_time - item['timestamp'] > MAX_STORAGE_DURATION]
+    for code in expired_items:
         del shared_items[code]
+    
+    # Clean shortened URLs
+    expired_urls = [code for code, item in shortened_urls.items()
+                    if current_time - item['timestamp'] > MAX_STORAGE_DURATION]
+    for code in expired_urls:
+        del shortened_urls[code]
 
 def make_qr_png(data: str, logo_data=None, logo_size_percent=25, add_bg=False) -> str:
     """Generate PNG QR code from string data with optional logo overlay"""
     try:
+        # Determine appropriate QR version based on data size
+        data_length = len(data.encode('utf-8'))
+        
+        # Calculate minimum version needed
+        # Approximate capacity per version (binary mode, H error correction)
+        version_capacities = {
+            1: 72, 2: 128, 3: 184, 4: 240, 5: 296,
+            6: 352, 7: 408, 8: 464, 9: 520, 10: 576,
+            11: 640, 12: 704, 13: 768, 14: 832, 15: 896,
+            16: 960, 17: 1024, 18: 1088, 19: 1152, 20: 1216,
+            21: 1280, 22: 1344, 23: 1408, 24: 1472, 25: 1536,
+            26: 1600, 27: 1664, 28: 1728, 29: 1792, 30: 1856,
+            31: 1920, 32: 1984, 33: 2048, 34: 2112, 35: 2176,
+            36: 2240, 37: 2304, 38: 2368, 39: 2432, 40: 2500
+        }
+        
+        # Find appropriate version
+        version = 1
+        for v in range(1, 41):
+            if data_length <= version_capacities[v]:
+                version = v
+                break
+        else:
+            # If data is too large even for version 40
+            return f'<p class="text-red-600 bg-red-50 p-3 rounded">Data too large for QR code (max 2500 bytes)</p>'
+        
         qr = qrcode.QRCode(
-            version=1,
+            version=version,  # Auto-select version based on data size
             error_correction=qrcode.constants.ERROR_CORRECT_H,  # Higher error correction for logo
             box_size=10,
             border=4,
@@ -112,11 +150,18 @@ def make_qr_png(data: str, logo_data=None, logo_size_percent=25, add_bg=False) -
         bio.seek(0)
         
         img_b64 = base64.b64encode(bio.getvalue()).decode()
+        
+        # Add version info for debugging
+        version_info = ""
+        if version > 20:  # Only show warning for large versions
+            version_info = f'<p class="text-xs text-orange-500 mt-1">Using QR version {version} (high capacity)</p>'
+        
         return f'''
         <div class="bg-gray-50 p-4 rounded-lg">
             <img src="data:image/png;base64,{img_b64}" alt="QR Code" class="qr-img mx-auto">
             <p class="text-sm text-green-600 mt-3 font-medium">✓ QR Code Generated Successfully!</p>
             <p class="text-xs text-gray-500 mt-1">Scan this QR code with your phone's camera</p>
+            {version_info}
         </div>
         '''
     except Exception as e:
@@ -125,6 +170,11 @@ def make_qr_png(data: str, logo_data=None, logo_size_percent=25, add_bg=False) -
 @app.route("/")
 def index():
     return render_template("index.html")
+
+@app.route("/view")
+def view_content():
+    """Page for viewing shared content"""
+    return render_template("view.html")
 
 @app.route("/qr/url", methods=["POST"])
 def qr_from_url():
@@ -173,12 +223,24 @@ def qr_from_file():
         
         # Read file data
         data = file.read()
-        if len(data) > 2 * 1024 * 1024:
-            return "<p class='text-red-600 bg-red-50 p-3 rounded'>File too large (>2 MB).</p>"
-
+        file_size = len(data)
+        
+        # Calculate maximum QR code capacity for different versions
+        # QR code version 40 (max) can hold about 2.9KB of data in binary mode
+        # with high error correction
+        MAX_QR_DATA_SIZE = 2500  # Conservative limit for version 40
+        
+        if file_size > MAX_QR_DATA_SIZE:
+            # File is too large for direct QR encoding
+            # Create a share and generate QR with download link instead
+            return handle_large_file_for_qr(file, data, logo_size, add_bg)
+        
+        # File is small enough for direct QR encoding
+        # Create data URL
+        import mimetypes
+        mime_type = mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
         b64 = base64.b64encode(data).decode()
-        mime = file.mimetype or "application/octet-stream"
-        data_url = f"data:{mime};base64,{b64}"
+        data_url = f"data:{mime_type};base64,{b64}"
         
         # Handle logo upload
         logo_data = None
@@ -192,11 +254,228 @@ def qr_from_file():
                 except Exception as e:
                     print(f"Error reading logo: {e}")
         
-        print(f"Generated data URL for file: {file.filename}")
+        print(f"Generating QR with data URL for file: {file.filename} ({file_size} bytes)")
+        
+        # Generate QR code
         return make_qr_png(data_url, logo_data, logo_size, add_bg)
         
     except Exception as e:
+        print(f"Error processing file: {e}")
         return f'<p class="text-red-600 bg-red-50 p-3 rounded">Error processing file: {str(e)}</p>'
+
+
+def handle_large_file_for_qr(file, data, logo_size, add_bg):
+    """Handle files too large for direct QR encoding"""
+    try:
+        # Create a share for the file
+        cleanup_expired()
+        
+        # Generate unique code for the file
+        share_code = generate_secret_code()
+        while share_code in shared_items:
+            share_code = generate_secret_code()
+        
+        # Store the file content
+        shared_items[share_code] = {
+            'type': 'file',
+            'content': base64.b64encode(data).decode(),
+            'timestamp': time.time(),
+            'password': '',  # No password for QR file shares
+            'filename': file.filename,
+            'size': len(data)
+        }
+        
+        # Create download URL
+        download_url = f"{request.host_url}download/{share_code}"
+        
+        # Handle logo upload
+        logo_data = None
+        if 'logo' in request.files:
+            logo_file = request.files['logo']
+            if logo_file and logo_file.filename:
+                try:
+                    logo_data = logo_file.read()
+                    if len(logo_data) > 1 * 1024 * 1024:
+                        return "<p class='text-red-600 bg-red-50 p-3 rounded'>Logo file too large (>1 MB).</p>"
+                except Exception as e:
+                    print(f"Error reading logo: {e}")
+        
+        print(f"File too large for direct QR. Created share: {share_code} for {file.filename}")
+        
+        # Generate QR code with the download URL
+        qr_html = make_qr_png(download_url, logo_data, logo_size, add_bg)
+        
+        # Add info message and actions
+        info_html = f'''
+        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <i class="fas fa-exclamation-triangle text-yellow-400"></i>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm text-yellow-700">
+                        <span class="font-medium">Note:</span> File too large for direct QR code.
+                        Generated a QR code with a download link instead.
+                    </p>
+                    <div class="mt-2">
+                        <p class="text-xs text-yellow-600">
+                            File: <span class="font-medium">{file.filename}</span> 
+                            ({format_file_size(len(data))})
+                        </p>
+                        <p class="text-xs text-yellow-600 mt-1">
+                            Share Code: <span class="font-mono bg-yellow-100 px-2 py-1 rounded">{share_code}</span>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="mt-4 flex flex-wrap gap-2 justify-center">
+            <button onclick="copyToClipboard('{download_url}')" class="copy-btn">
+                <i class="fas fa-copy mr-1"></i>Copy Download Link
+            </button>
+            <button onclick="copyToClipboard('{share_code}')" class="copy-btn">
+                <i class="fas fa-key mr-1"></i>Copy Share Code
+            </button>
+            <button onclick="window.open('/view?code={share_code}', '_blank')" class="btn-secondary text-sm">
+                <i class="fas fa-eye mr-1"></i>Preview File
+            </button>
+        </div>
+        '''
+        
+        return info_html + qr_html
+        
+    except Exception as e:
+        print(f"Error handling large file: {e}")
+        return f'<p class="text-red-600 bg-red-50 p-3 rounded">Error handling file: {str(e)}</p>'
+
+
+def format_file_size(bytes):
+    """Format file size in human-readable format"""
+    if bytes < 1024:
+        return f"{bytes} bytes"
+    elif bytes < 1024 * 1024:
+        return f"{bytes/1024:.1f} KB"
+    else:
+        return f"{bytes/(1024*1024):.1f} MB"
+
+# URL Shortener Routes
+@app.route("/shorten", methods=["POST", "OPTIONS"])
+def shorten_url():
+    """Shorten a URL"""
+    # Handle preflight CORS requests
+    if request.method == "OPTIONS":
+        response = jsonify({"status": "ok"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+    
+    try:
+        cleanup_expired()
+        
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+            
+        original_url = data.get("url", "").strip()
+        custom_code = data.get("custom_code", "").strip().lower()
+        
+        if not original_url:
+            return jsonify({"success": False, "error": "No URL provided"}), 400
+        
+        if not original_url.startswith(('http://', 'https://')):
+            original_url = 'https://' + original_url
+        
+        # Generate or use custom code
+        if custom_code:
+            if len(custom_code) < 4 or len(custom_code) > 12:
+                return jsonify({"success": False, "error": "Custom code must be 4-12 characters"}), 400
+            if not all(c.isalnum() for c in custom_code):
+                return jsonify({"success": False, "error": "Custom code can only contain letters and numbers"}), 400
+            if custom_code in shortened_urls:
+                return jsonify({"success": False, "error": "Custom code already in use"}), 400
+            short_code = custom_code
+        else:
+            short_code = generate_short_code()
+            while short_code in shortened_urls:
+                short_code = generate_short_code()
+        
+        # Store the shortened URL
+        shortened_urls[short_code] = {
+            'original_url': original_url,
+            'timestamp': time.time(),
+            'visits': 0
+        }
+        
+        # Use request.host_url which should work on Render
+        short_url = f"{request.host_url}{short_code}"
+        
+        response = jsonify({
+            "success": True, 
+            "short_code": short_code,
+            "short_url": short_url,
+            "original_url": original_url
+        })
+        
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+        
+    except Exception as e:
+        print(f"Error shortening URL: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@app.route("/<short_code>")
+def redirect_short_url(short_code):
+    """Redirect to original URL"""
+    cleanup_expired()
+    
+    short_code = short_code.lower()
+    
+    if short_code in shortened_urls:
+        shortened_urls[short_code]['visits'] += 1
+        return redirect(shortened_urls[short_code]['original_url'])
+    else:
+        return redirect("/")
+
+@app.route("/shorten/stats", methods=["POST", "OPTIONS"])
+def get_short_url_stats():
+    """Get statistics for a short URL"""
+    # Handle preflight CORS
+    if request.method == "OPTIONS":
+        response = jsonify({"status": "ok"})
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+            
+        short_code = data.get("code", "").strip().lower()
+        
+        if not short_code:
+            return jsonify({"success": False, "error": "No code provided"}), 400
+        
+        if short_code not in shortened_urls:
+            return jsonify({"success": False, "error": "Invalid or expired short URL"}), 404
+        
+        item = shortened_urls[short_code]
+        expires_at = int(item['timestamp'] + MAX_STORAGE_DURATION)
+        
+        response = jsonify({
+            "success": True,
+            "short_code": short_code,
+            "original_url": item['original_url'],
+            "visits": item['visits'],
+            "created_at": int(item['timestamp']),
+            "expires_at": expires_at,
+            "short_url": f"{request.host_url}{short_code}"
+        })
+        
+        response.headers.add("Access-Control-Allow-Origin", "*")
+        return response
+        
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 @app.route("/share", methods=["POST"])
 def share_content():
@@ -331,153 +610,13 @@ def download_file(code):
 @app.route("/retrieve/<code>")
 def retrieve_page(code):
     """Direct page for retrieving content with a code"""
-    return render_template("index.html")
+    # Redirect to the new view page
+    return redirect(f"/view?code={code}")
 
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     return send_from_directory('static', filename)
 
-@app.route("/shorten", methods=["POST", "OPTIONS"])
-def shorten_url():
-    """Shorten a URL"""
-    # Handle preflight CORS requests
-    if request.method == "OPTIONS":
-        response = jsonify({"status": "ok"})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Headers", "*")
-        response.headers.add("Access-Control-Allow-Methods", "*")
-        return response
-    
-    try:
-        cleanup_expired()
-        
-        data = request.get_json()
-        if not data:
-            return jsonify({"success": False, "error": "No data provided"}), 400
-            
-        original_url = data.get("url", "").strip()
-        custom_code = data.get("custom_code", "").strip().lower()
-        
-        if not original_url:
-            return jsonify({"success": False, "error": "No URL provided"}), 400
-        
-        if not original_url.startswith(('http://', 'https://')):
-            original_url = 'https://' + original_url
-        
-        # Generate or use custom code
-        if custom_code:
-            if len(custom_code) < 4 or len(custom_code) > 12:
-                return jsonify({"success": False, "error": "Custom code must be 4-12 characters"}), 400
-            if not all(c.isalnum() for c in custom_code):
-                return jsonify({"success": False, "error": "Custom code can only contain letters and numbers"}), 400
-            if custom_code in shortened_urls:
-                return jsonify({"success": False, "error": "Custom code already in use"}), 400
-            short_code = custom_code
-        else:
-            short_code = generate_short_code()
-            while short_code in shortened_urls:
-                short_code = generate_short_code()
-        
-        # Store the shortened URL
-        shortened_urls[short_code] = {
-            'original_url': original_url,
-            'timestamp': time.time(),
-            'visits': 0
-        }
-        
-        # Use request.host_url which should work on Render
-        short_url = f"{request.host_url}{short_code}"
-        
-        response = jsonify({
-            "success": True, 
-            "short_code": short_code,
-            "short_url": short_url,
-            "original_url": original_url
-        })
-        
-        # Add CORS headers
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response
-        
-    except Exception as e:
-        print(f"Error shortening URL: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-@app.route("/<short_code>")
-def redirect_short_url(short_code):
-    """Redirect to original URL"""
-    cleanup_expired()
-    
-    short_code = short_code.lower()
-    
-    if short_code in shortened_urls:
-        shortened_urls[short_code]['visits'] += 1
-        return redirect(shortened_urls[short_code]['original_url'])
-    else:
-        return redirect("/")
-
-@app.route("/shorten/stats", methods=["POST", "OPTIONS"])
-def get_short_url_stats():
-    """Get statistics for a short URL"""
-    # Handle preflight CORS
-    if request.method == "OPTIONS":
-        response = jsonify({"status": "ok"})
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        response.headers.add("Access-Control-Allow-Headers", "*")
-        response.headers.add("Access-Control-Allow-Methods", "*")
-        return response
-    
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({"success": False, "error": "No data provided"}), 400
-            
-        short_code = data.get("code", "").strip().lower()
-        
-        if not short_code:
-            return jsonify({"success": False, "error": "No code provided"}), 400
-        
-        if short_code not in shortened_urls:
-            return jsonify({"success": False, "error": "Invalid or expired short URL"}), 404
-        
-        item = shortened_urls[short_code]
-        expires_at = int(item['timestamp'] + MAX_STORAGE_DURATION)
-        
-        response = jsonify({
-            "success": True,
-            "short_code": short_code,
-            "original_url": item['original_url'],
-            "visits": item['visits'],
-            "created_at": int(item['timestamp']),
-            "expires_at": expires_at,
-            "short_url": f"{request.host_url}{short_code}"
-        })
-        
-        response.headers.add("Access-Control-Allow-Origin", "*")
-        return response
-        
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-# Also update the cleanup_expired function to clean shortened URLs
-def cleanup_expired():
-    """Remove expired shared items and shortened URLs"""
-    current_time = time.time()
-    
-    # Clean shared items
-    expired_items = [code for code, item in shared_items.items() 
-                     if current_time - item['timestamp'] > MAX_STORAGE_DURATION]
-    for code in expired_items:
-        del shared_items[code]
-    
-    # Clean shortened URLs (if the dictionary exists)
-    if 'shortened_urls' in globals():
-        expired_urls = [code for code, item in shortened_urls.items()
-                        if current_time - item['timestamp'] > MAX_STORAGE_DURATION]
-        for code in expired_urls:
-            del shortened_urls[code]
-
-# Change the run section to:
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port, debug=False)
