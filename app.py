@@ -13,9 +13,20 @@ from flask import send_from_directory
 import qrcode
 from io import BytesIO
 from PIL import Image
+import threading
+import mimetypes
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", secrets.token_hex(32))
+
+# Configuration
+MAX_STORAGE_DURATION = 96 * 3600  # 96 hours (4 days)
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+STORAGE_DIR = "shared_files"
+MAX_QR_DATA_SIZE = 2500  # Conservative limit for QR version 40
+
+# Ensure storage directory exists
+os.makedirs(STORAGE_DIR, exist_ok=True)
 
 # Add CORS headers to all responses
 @app.after_request
@@ -25,11 +36,9 @@ def after_request(response):
     response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
     return response
 
-# In-memory storage (use database in production)
+# In-memory storage for metadata (files are stored on disk)
 shared_items = {}
 shortened_urls = {}  # Add this for URL shortener
-MAX_STORAGE_DURATION = 24 * 3600  # 24 hours in seconds
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 def generate_secret_code(length=12):
     """Generate a readable secret code"""
@@ -43,13 +52,50 @@ def generate_short_code(length=6):
     chars = string.ascii_lowercase + string.digits
     return ''.join(secrets.choice(chars) for _ in range(length))
 
+def save_file_to_disk(code, file_data, filename):
+    """Save file to disk and return file path"""
+    # Create a safe filename
+    import re
+    safe_name = re.sub(r'[^\w\.-]', '_', filename)
+    safe_filename = f"{code}_{safe_name}"
+    file_path = os.path.join(STORAGE_DIR, safe_filename)
+    
+    # Write file to disk
+    with open(file_path, 'wb') as f:
+        f.write(file_data)
+    
+    return file_path
+
+def load_file_from_disk(file_path):
+    """Load file from disk"""
+    if os.path.exists(file_path):
+        with open(file_path, 'rb') as f:
+            return f.read()
+    return None
+
+def delete_file_from_disk(file_path):
+    """Delete file from disk"""
+    try:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            return True
+    except Exception as e:
+        print(f"Error deleting file {file_path}: {e}")
+    return False
+
 def cleanup_expired():
-    """Remove expired shared items and shortened URLs"""
+    """Remove expired shared items, shortened URLs, and delete files from disk"""
     current_time = time.time()
     
     # Clean shared items
-    expired_items = [code for code, item in shared_items.items() 
-                     if current_time - item['timestamp'] > MAX_STORAGE_DURATION]
+    expired_items = []
+    for code, item in shared_items.items():
+        if current_time - item['timestamp'] > MAX_STORAGE_DURATION:
+            expired_items.append(code)
+            # Delete file from disk if it exists
+            if 'file_path' in item and item['file_path']:
+                delete_file_from_disk(item['file_path'])
+    
     for code in expired_items:
         del shared_items[code]
     
@@ -58,6 +104,52 @@ def cleanup_expired():
                     if current_time - item['timestamp'] > MAX_STORAGE_DURATION]
     for code in expired_urls:
         del shortened_urls[code]
+    
+    # Also clean up any orphaned files in storage directory
+    if expired_items:
+        cleanup_orphaned_files()
+
+def cleanup_orphaned_files():
+    """Clean up files in storage directory that don't have entries in shared_items"""
+    try:
+        for filename in os.listdir(STORAGE_DIR):
+            file_path = os.path.join(STORAGE_DIR, filename)
+            if os.path.isfile(file_path):
+                # Extract code from filename (format: CODE_original_filename)
+                parts = filename.split('_', 1)
+                if len(parts) >= 1:
+                    code = parts[0]
+                    # Check if this code exists in shared_items
+                    if code not in shared_items:
+                        # File is orphaned, delete it
+                        delete_file_from_disk(file_path)
+    except Exception as e:
+        print(f"Error cleaning orphaned files: {e}")
+
+def start_cleanup_scheduler():
+    """Start a background thread to periodically clean up expired files"""
+    def cleanup_task():
+        while True:
+            time.sleep(3600)  # Run every hour
+            cleanup_expired()
+            print(f"Cleanup completed at {time.ctime()}")
+    
+    # Start the cleanup thread
+    cleanup_thread = threading.Thread(target=cleanup_task, daemon=True)
+    cleanup_thread.start()
+    print("Cleanup scheduler started")
+
+# Start cleanup scheduler when app starts
+start_cleanup_scheduler()
+
+def format_file_size(bytes):
+    """Format file size in human-readable format"""
+    if bytes < 1024:
+        return f"{bytes} bytes"
+    elif bytes < 1024 * 1024:
+        return f"{bytes/1024:.1f} KB"
+    else:
+        return f"{bytes/(1024*1024):.1f} MB"
 
 def make_qr_png(data: str, logo_data=None, logo_size_percent=25, add_bg=False) -> str:
     """Generate PNG QR code from string data with optional logo overlay"""
@@ -225,11 +317,6 @@ def qr_from_file():
         data = file.read()
         file_size = len(data)
         
-        # Calculate maximum QR code capacity for different versions
-        # QR code version 40 (max) can hold about 2.9KB of data in binary mode
-        # with high error correction
-        MAX_QR_DATA_SIZE = 2500  # Conservative limit for version 40
-        
         if file_size > MAX_QR_DATA_SIZE:
             # File is too large for direct QR encoding
             # Create a share and generate QR with download link instead
@@ -237,7 +324,6 @@ def qr_from_file():
         
         # File is small enough for direct QR encoding
         # Create data URL
-        import mimetypes
         mime_type = mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
         b64 = base64.b64encode(data).decode()
         data_url = f"data:{mime_type};base64,{b64}"
@@ -263,7 +349,6 @@ def qr_from_file():
         print(f"Error processing file: {e}")
         return f'<p class="text-red-600 bg-red-50 p-3 rounded">Error processing file: {str(e)}</p>'
 
-
 def handle_large_file_for_qr(file, data, logo_size, add_bg):
     """Handle files too large for direct QR encoding"""
     try:
@@ -275,14 +360,18 @@ def handle_large_file_for_qr(file, data, logo_size, add_bg):
         while share_code in shared_items:
             share_code = generate_secret_code()
         
-        # Store the file content
+        # Save file to disk
+        file_path = save_file_to_disk(share_code, data, file.filename)
+        
+        # Store the file metadata
         shared_items[share_code] = {
             'type': 'file',
             'content': base64.b64encode(data).decode(),
             'timestamp': time.time(),
             'password': '',  # No password for QR file shares
             'filename': file.filename,
-            'size': len(data)
+            'size': len(data),
+            'file_path': file_path
         }
         
         # Create download URL
@@ -348,16 +437,6 @@ def handle_large_file_for_qr(file, data, logo_size, add_bg):
     except Exception as e:
         print(f"Error handling large file: {e}")
         return f'<p class="text-red-600 bg-red-50 p-3 rounded">Error handling file: {str(e)}</p>'
-
-
-def format_file_size(bytes):
-    """Format file size in human-readable format"""
-    if bytes < 1024:
-        return f"{bytes} bytes"
-    elif bytes < 1024 * 1024:
-        return f"{bytes/1024:.1f} KB"
-    else:
-        return f"{bytes/(1024*1024):.1f} MB"
 
 # URL Shortener Routes
 @app.route("/shorten", methods=["POST", "OPTIONS"])
@@ -492,6 +571,7 @@ def share_content():
                 return jsonify({"success": False, "error": "No URL provided"})
             if not content.startswith(('http://', 'https://')):
                 content = 'https://' + content
+            file_path = None
             
         elif share_type == "file":
             if "file" not in request.files:
@@ -501,8 +581,8 @@ def share_content():
             if file.filename == "":
                 return jsonify({"success": False, "error": "No file selected"})
             
-            content = file.read()
-            if len(content) > MAX_FILE_SIZE:
+            file_data = file.read()
+            if len(file_data) > MAX_FILE_SIZE:
                 return jsonify({"success": False, "error": f"File too large (max {MAX_FILE_SIZE//1024//1024}MB)"})
             
             filename = request.form.get("filename", file.filename)
@@ -511,6 +591,7 @@ def share_content():
             content = request.form.get("content", "").strip()
             if not content:
                 return jsonify({"success": False, "error": "No text provided"})
+            file_path = None
         else:
             return jsonify({"success": False, "error": "Invalid share type"})
         
@@ -520,16 +601,33 @@ def share_content():
             code = generate_secret_code()
         
         # Store the content
-        shared_items[code] = {
-            'type': share_type,
-            'content': content if share_type != 'file' else base64.b64encode(content).decode(),
-            'timestamp': time.time(),
-            'password': password,
-            'filename': filename if share_type == 'file' else None,
-            'size': len(content) if share_type == 'file' else None
-        }
+        if share_type == 'file':
+            # Save file to disk
+            file_path = save_file_to_disk(code, file_data, filename)
+            shared_items[code] = {
+                'type': share_type,
+                'content': base64.b64encode(file_data).decode(),  # Keep base64 for compatibility
+                'timestamp': time.time(),
+                'password': password,
+                'filename': filename,
+                'size': len(file_data),
+                'file_path': file_path  # Store the path to the file on disk
+            }
+        else:
+            shared_items[code] = {
+                'type': share_type,
+                'content': content,
+                'timestamp': time.time(),
+                'password': password,
+                'filename': None,
+                'size': None,
+                'file_path': None
+            }
         
         print(f"Stored {share_type} with code: {code}")
+        if share_type == 'file':
+            print(f"File saved to: {file_path}")
+        
         return jsonify({"success": True, "code": code})
         
     except Exception as e:
@@ -568,6 +666,7 @@ def retrieve_content():
         if item['type'] == 'link':
             response["content"] = item['content']
         elif item['type'] == 'file':
+            # For files, we keep the base64 in memory for quick retrieval
             response["content"] = item['content']  # base64 encoded
             response["filename"] = item['filename']
             response["size"] = item['size']
@@ -591,6 +690,21 @@ def download_file(code):
             return "File not found or expired", 404
         
         item = shared_items[code]
+        
+        # Try to read from disk first
+        if 'file_path' in item and item['file_path']:
+            file_data = load_file_from_disk(item['file_path'])
+            if file_data:
+                response = Response(
+                    file_data,
+                    status=200,
+                    mimetype='application/octet-stream'
+                )
+                response.headers.set('Content-Disposition', 'attachment', 
+                                   filename=item['filename'] or f'download_{code}.bin')
+                return response
+        
+        # Fallback to base64 content (for backward compatibility)
         file_data = base64.b64decode(item['content'])
         
         response = Response(
@@ -616,6 +730,49 @@ def retrieve_page(code):
 @app.route('/static/<path:filename>')
 def serve_static(filename):
     return send_from_directory('static', filename)
+
+@app.route("/admin/cleanup", methods=["GET"])
+def manual_cleanup():
+    """Manually trigger cleanup (for testing/admin)"""
+    try:
+        cleanup_expired()
+        file_count = len([f for f in os.listdir(STORAGE_DIR) if os.path.isfile(os.path.join(STORAGE_DIR, f))]) if os.path.exists(STORAGE_DIR) else 0
+        return jsonify({
+            "success": True,
+            "message": f"Cleanup completed. Storage directory: {STORAGE_DIR}",
+            "file_count": file_count,
+            "shared_items_count": len(shared_items),
+            "shortened_urls_count": len(shortened_urls)
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
+
+@app.route("/admin/stats", methods=["GET"])
+def admin_stats():
+    """Get admin statistics"""
+    try:
+        file_count = len([f for f in os.listdir(STORAGE_DIR) if os.path.isfile(os.path.join(STORAGE_DIR, f))]) if os.path.exists(STORAGE_DIR) else 0
+        
+        # Calculate total storage used
+        total_size = 0
+        if os.path.exists(STORAGE_DIR):
+            for filename in os.listdir(STORAGE_DIR):
+                file_path = os.path.join(STORAGE_DIR, filename)
+                if os.path.isfile(file_path):
+                    total_size += os.path.getsize(file_path)
+        
+        return jsonify({
+            "success": True,
+            "storage_dir": STORAGE_DIR,
+            "file_count": file_count,
+            "total_storage_used": format_file_size(total_size),
+            "shared_items_count": len(shared_items),
+            "shortened_urls_count": len(shortened_urls),
+            "max_storage_duration_hours": MAX_STORAGE_DURATION / 3600,
+            "max_file_size_mb": MAX_FILE_SIZE / (1024 * 1024)
+        })
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
